@@ -10,6 +10,7 @@ add_executable(engine_tests
   normal_encoding_material_tests.cpp
   unlit_material_tests.cpp
   gltf_material_import_tests.cpp
+  mesh_transform_compose_tests.cpp
   draw_key_bound_tests.cpp
   draw_group_tests.cpp
   variant_pipeline_state_tests.cpp

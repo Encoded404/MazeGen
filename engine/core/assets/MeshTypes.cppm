@@ -49,6 +49,79 @@ export namespace VulkanEngine
         float half_extent_w{0.0f};
     };
 
+    // A submesh's placement inside its asset. A loader writes the transform it
+    // baked from the source (for glTF, the node's accumulated world transform);
+    // the identity default leaves every existing loader's output unchanged.
+    //
+    // Plain TRS, not a matrix: the render path represents R*S exactly (the
+    // expand pass builds the model matrix and the closed-form normal matrix from
+    // a TRS entry) and cannot express shear. Composing two of these shears when
+    // the parent scale is non-uniform and the child is rotated — importers detect
+    // that on the source data and warn rather than widening this contract.
+    struct SubMeshTransform
+    {
+        MeshVertexVec3 position{}; //NOLINT(misc-non-private-member-variables-in-classes)
+        float rotation[4]{0.0f, 0.0f, 0.0f, 1.0f}; //NOLINT(misc-non-private-member-variables-in-classes) xyzw
+        MeshVertexVec3 scale{1.0f, 1.0f, 1.0f}; //NOLINT(misc-non-private-member-variables-in-classes)
+    };
+
+    // Composes a parent TRS with a child TRS: result = parent * child.
+    //
+    //   position = parent.position + rotate(parent.rotation, parent.scale * child.position)
+    //   rotation = parent.rotation * child.rotation
+    //   scale    = parent.scale * child.scale
+    //
+    // Only the parent's rotation and scale move the child's origin; the child's
+    // own rotation composes into the result and applies to the child's geometry.
+    //
+    // Exact while neither operand shears (a uniform parent scale, or no child
+    // rotation). See SubMeshTransform for the caveat.
+    [[nodiscard]] inline SubMeshTransform ComposeSubmeshTransform(
+        const SubMeshTransform& parent,
+        const SubMeshTransform& local)
+    {
+        // v' = v + 2*q.w*(q.xyz x v) + 2*(q.xyz x (q.xyz x v)), xyzw quaternion.
+        const auto rotate = [](const float q[4], const MeshVertexVec3& v) {
+            const float tx = 2.0f * (q[1] * v.z - q[2] * v.y);
+            const float ty = 2.0f * (q[2] * v.x - q[0] * v.z);
+            const float tz = 2.0f * (q[0] * v.y - q[1] * v.x);
+            return MeshVertexVec3{
+                v.x + q[3] * tx + (q[1] * tz - q[2] * ty),
+                v.y + q[3] * ty + (q[2] * tx - q[0] * tz),
+                v.z + q[3] * tz + (q[0] * ty - q[1] * tx),
+            };
+        };
+
+        const MeshVertexVec3 scaled_local{
+            parent.scale.x * local.position.x,
+            parent.scale.y * local.position.y,
+            parent.scale.z * local.position.z,
+        };
+        const MeshVertexVec3 rotated = rotate(parent.rotation, scaled_local);
+
+        SubMeshTransform out{};
+        out.position = MeshVertexVec3{
+            parent.position.x + rotated.x,
+            parent.position.y + rotated.y,
+            parent.position.z + rotated.z,
+        };
+
+        // Hamilton product parent.rotation * local.rotation, xyzw.
+        const float* a = parent.rotation;
+        const float* b = local.rotation;
+        out.rotation[0] = a[3] * b[0] + a[0] * b[3] + a[1] * b[2] - a[2] * b[1];
+        out.rotation[1] = a[3] * b[1] - a[0] * b[2] + a[1] * b[3] + a[2] * b[0];
+        out.rotation[2] = a[3] * b[2] + a[0] * b[1] - a[1] * b[0] + a[2] * b[3];
+        out.rotation[3] = a[3] * b[3] - a[0] * b[0] - a[1] * b[1] - a[2] * b[2];
+
+        out.scale = MeshVertexVec3{
+            parent.scale.x * local.scale.x,
+            parent.scale.y * local.scale.y,
+            parent.scale.z * local.scale.z,
+        };
+        return out;
+    }
+
     struct SubMesh
     {
         std::uint32_t index_start{0}; //NOLINT(misc-non-private-member-variables-in-classes)
@@ -63,6 +136,10 @@ export namespace VulkanEngine
         MaterialId material_id{0}; //NOLINT(misc-non-private-member-variables-in-classes)
         BoundingSphere sphere{};
         BoundingOBB obb{};
+        // Placement of this submesh inside the asset. Identity for formats that
+        // carry no node hierarchy (OBJ, the engine BIN format) and for the
+        // synthetic meshes; the glTF importer bakes each node's world transform.
+        SubMeshTransform transform{}; //NOLINT(misc-non-private-member-variables-in-classes)
     };
 
     // Computes SubMesh::vertex_window_base / vertex_span from the mesh-local
