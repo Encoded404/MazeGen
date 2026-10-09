@@ -8,6 +8,7 @@ import vulkan;
 
 export import VulkanEngine.Renderer;
 export import VulkanEngine.SceneLoader;
+export import VulkanEngine.FileLoaders.Mesh.GltfMaterialImport;
 export import VulkanEngine.TechniqueManager;
 export import VulkanEngine.MaterialManager;
 export import VulkanEngine.BindlessManager;
@@ -68,6 +69,20 @@ public:
                               TextureSemantic semantic,
                               TextureNormalEncoding normal_encoding,
                               const SamplerDesc& sampler);
+
+    // Loads and uploads a texture from a glTF image reference, so a GLB's
+    // embedded images (and a data: URI or a buffer-view image) reach the
+    // bindless set without the app having to know which form the file used.
+    // `asset_dir` resolves a relative URI; an absolute URI is used as-is.
+    // Returns the fallback slot when the image cannot be resolved or decoded.
+    // Hot reload applies to a URI image only: embedded bytes have no path to
+    // watch.
+    std::uint32_t LoadTextureFromGltfImage(VulkanEngine::Application::ApplicationContext& ctx,
+                                           const FileLoaders::Mesh::GltfImageRef& image,
+                                           TextureSemantic semantic,
+                                           TextureNormalEncoding normal_encoding,
+                                           const SamplerDesc& sampler,
+                                           const std::filesystem::path& asset_dir = {});
     bool InitRenderer(VulkanEngine::Application::ApplicationContext& ctx,
                       ShaderSystem::ShaderId vert_id = 0,
                       ShaderSystem::ShaderId frag_id = 0,

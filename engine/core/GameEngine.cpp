@@ -21,10 +21,26 @@ import VulkanEngine.TextureTypes;
 import VulkanEngine.TextureFormat;
 import VulkanEngine.TextureUploader;
 import VulkanEngine.FileLoaders.TextureLoaders;
+import FileLoader.Types;
 import VulkanEngine.Text.FontReloader;
 import VulkanBackend.Vulkan.VulkanBootstrap;
 
 namespace VulkanEngine {
+
+namespace {
+
+// Content address for an image that arrived as bytes: identical embedded images
+// share one upload, and two different ones can never collide on a resource id.
+[[nodiscard]] std::uint64_t HashImageBytes(const std::span<const std::byte> bytes) {
+    std::uint64_t h = 1469598103934665603ull;
+    for (const std::byte b : bytes) {
+        h ^= static_cast<std::uint8_t>(b);
+        h *= 1099511628211ull;
+    }
+    return h;
+}
+
+} // namespace
 
 GameEngine::~GameEngine() {
     if (initialized_) {
@@ -145,6 +161,86 @@ uint32_t GameEngine::LoadTexture(VulkanEngine::Application::ApplicationContext& 
     }
     LOGIFACE_LOG(debug, "Failed to load texture from path: " + path.string() + ", using fallback");
     return BindlessManager::kFallbackSlot;
+}
+
+uint32_t GameEngine::LoadTextureFromGltfImage(VulkanEngine::Application::ApplicationContext& ctx,
+                                              const FileLoaders::Mesh::GltfImageRef& image,
+                                              TextureSemantic semantic,
+                                              TextureNormalEncoding normal_encoding,
+                                              const SamplerDesc& sampler,
+                                              const std::filesystem::path& asset_dir) {
+    using FileLoaders::Mesh::GltfImageRef;
+
+    if (image.source == GltfImageRef::Source::None) {
+        return BindlessManager::kFallbackSlot;
+    }
+
+    std::vector<std::byte> bytes;
+    std::filesystem::path source_path;
+
+    if (image.source == GltfImageRef::Source::Embedded) {
+        // A GLB image, a data: URI inlined by the importer, or a buffer view:
+        // the payload is already in memory.
+        bytes = image.embedded_bytes;
+    } else {
+        source_path = asset_dir.empty() || std::filesystem::path(image.uri).is_absolute()
+            ? std::filesystem::path(image.uri)
+            : asset_dir / image.uri;
+        std::ifstream file(source_path, std::ios::binary | std::ios::ate);
+        if (!file.is_open()) {
+            LOGIFACE_LOG(warn, "LoadTextureFromGltfImage: cannot open '" + source_path.string() +
+                               "', using fallback");
+            return BindlessManager::kFallbackSlot;
+        }
+        const auto size = static_cast<std::size_t>(file.tellg());
+        bytes.resize(size);
+        file.seekg(0, std::ios::beg);
+        if (size > 0 && !file.read(reinterpret_cast<char*>(bytes.data()),
+                                   static_cast<std::streamsize>(size))) {
+            LOGIFACE_LOG(warn, "LoadTextureFromGltfImage: cannot read '" + source_path.string() +
+                               "', using fallback");
+            return BindlessManager::kFallbackSlot;
+        }
+    }
+
+    if (bytes.empty()) {
+        LOGIFACE_LOG(warn, "LoadTextureFromGltfImage: empty image payload, using fallback");
+        return BindlessManager::kFallbackSlot;
+    }
+
+    const std::string resource_name = !image.uri.empty()
+        ? image.uri
+        : "gltf_embedded_" + std::to_string(bytes.size()) + "_" +
+              std::to_string(HashImageBytes(bytes));
+
+    // The resource decodes by content (PNG/JPG/KTX2) through the same loader the
+    // path-based LoadTexture uses; only the source of the bytes differs.
+    auto resource = std::make_shared<TextureResource>(ResourceId{resource_name});
+    const FileLoader::ByteBuffer buffer(bytes.begin(), bytes.end());
+    if (!resource->Load(buffer) || !resource->HasData()) {
+        LOGIFACE_LOG(warn, "LoadTextureFromGltfImage: failed to decode '" + resource_name +
+                           "', using fallback");
+        return BindlessManager::kFallbackSlot;
+    }
+
+    auto handle = ctx_.resource_manager.Register(resource);
+    if (!handle.IsValid()) {
+        LOGIFACE_LOG(warn, "LoadTextureFromGltfImage: failed to register '" + resource_name +
+                           "', using fallback");
+        return BindlessManager::kFallbackSlot;
+    }
+
+    const std::uint32_t slot =
+        UploadTextureToBindless(ctx, handle.Get(), semantic, normal_encoding, sampler);
+#ifdef VKENGINE_HOT_RELOAD
+    // Only a URI image has a file to watch; embedded bytes are re-imported with
+    // the asset, so there is nothing to register with the path-keyed watcher.
+    if (ctx_.texture_reloader && slot != BindlessManager::kFallbackSlot && !source_path.empty()) {
+        ctx_.texture_reloader->WatchResource(handle.GetId(), source_path, semantic,
+                                            normal_encoding, sampler);
+    }
+#endif
+    return slot;
 }
 
 std::shared_ptr<const VulkanEngine::Text::FontFace> GameEngine::LoadFont(
