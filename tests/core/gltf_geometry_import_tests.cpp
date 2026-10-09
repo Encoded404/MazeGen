@@ -506,4 +506,44 @@ TEST_F(GltfGeometryImportTest, SharedMeshGeometryIsEmittedOnceAndPlacedPerNode) 
     ExpectVec3(mesh->subMeshes[2].transform.position, 0.0f, 2.0f, 0.0f);
 }
 
+TEST_F(GltfGeometryImportTest, GeometryLoadDoesNotDependOnImageFiles) {
+    // The one material samples a texture whose file does not exist. Geometry
+    // never reads images, so the load must succeed; when the parse also loaded
+    // images, a missing texture failed the whole mesh load and reported it as
+    // "An external buffer was not found", naming the wrong resource.
+    const std::string json = R"json({
+  "asset": {"version": "2.0"},
+  "scene": 0,
+  "scenes": [{"nodes": [0]}],
+  "nodes": [{"mesh": 0}],
+  "meshes": [{"primitives": [{"attributes": {"POSITION": 0}, "indices": 1, "material": 0, "mode": 4}]}],
+  "materials": [{"pbrMetallicRoughness": {"baseColorTexture": {"index": 0}}}],
+  "textures": [{"source": 0}],
+  "images": [{"uri": "definitely_not_on_disk.png"}],
+  "buffers": [{"byteLength": 42}],
+  "bufferViews": [
+    {"buffer": 0, "byteOffset": 0, "byteLength": 36, "target": 34962},
+    {"buffer": 0, "byteOffset": 36, "byteLength": 6, "target": 34963}
+  ],
+  "accessors": [
+    {"bufferView": 0, "componentType": 5126, "count": 3, "type": "VEC3"},
+    {"bufferView": 1, "componentType": 5123, "count": 3, "type": "SCALAR"}
+  ]
+})json";
+    std::vector<std::byte> bin;
+    AppendFloat(bin, 0.0f); AppendFloat(bin, 0.0f); AppendFloat(bin, 0.0f);
+    AppendFloat(bin, 1.0f); AppendFloat(bin, 0.0f); AppendFloat(bin, 0.0f);
+    AppendFloat(bin, 0.0f); AppendFloat(bin, 1.0f); AppendFloat(bin, 0.0f);
+    AppendU16(bin, 0); AppendU16(bin, 1); AppendU16(bin, 2);
+
+    const auto path = WriteFixture("missing_texture.glb", MakeGlb(json, bin));
+    ASSERT_FALSE(std::filesystem::exists(dir_ / "definitely_not_on_disk.png"));
+
+    const std::shared_ptr<Mesh> mesh = Assemble(path);
+    ASSERT_NE(mesh, nullptr);
+    EXPECT_EQ(mesh->vertices.size(), 3u);
+    EXPECT_EQ(mesh->indices.size(), 3u);
+    EXPECT_EQ(mesh->subMeshes.size(), 1u);
+}
+
 } // namespace

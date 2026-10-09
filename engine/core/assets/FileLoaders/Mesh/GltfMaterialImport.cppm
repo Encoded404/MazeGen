@@ -75,7 +75,7 @@ inline constexpr std::size_t kNoGltfSampler = std::numeric_limits<std::size_t>::
 
 // A glTF image source. `Uri` carries the raw external URI (a relative path the
 // caller resolves against the asset directory); `Embedded` carries the payload
-// bytes (a GLB-embedded image, a `data:` URI inlined by LoadExternalImages, or
+// bytes (a GLB-embedded image, a `data:` URI, which fastgltf always decodes, or
 // an image stored in a buffer view), so no second read is needed.
 struct GltfImageRef {
     enum class Source : std::uint8_t { None, Uri, Embedded };

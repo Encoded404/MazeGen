@@ -594,10 +594,15 @@ GltfMeshAssembler::AssembleFromFullBuffer(std::shared_ptr<FileLoader::ByteBuffer
         }
 
         // loadGltf detects JSON vs GLB, so .gltf and .glb share one path;
-        // external buffers and images resolve against the asset's directory.
+        // external buffers resolve against the asset's directory. Images are
+        // deliberately left alone: this loader never reads asset.images, and
+        // asking fastgltf to load them would make a missing or unreadable
+        // texture fail a mesh load (reported as "An external buffer was not
+        // found", which names the wrong resource) after reading every image
+        // once here and again in ImportGltfMaterials. A `data:` URI is decoded
+        // by fastgltf whether or not this option is set.
         auto asset = parser.loadGltf(data.get(), source_path_.parent_path(),
-                                     fastgltf::Options::LoadExternalBuffers |
-                                     fastgltf::Options::LoadExternalImages);
+                                     fastgltf::Options::LoadExternalBuffers);
         if (asset.error() != fastgltf::Error::None) {
             throw std::runtime_error("GltfMeshAssembler: failed to load '" + source_path_.string() +
                                      "': " + std::string(fastgltf::getErrorMessage(asset.error())));

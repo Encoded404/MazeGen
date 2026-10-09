@@ -93,8 +93,8 @@ template <typename OptionalTextureInfo>
         ref.uri = std::string(uri->uri.string());
         ref.mime_type = MimeName(uri->mimeType);
     } else if (const auto* array = std::get_if<fastgltf::sources::Array>(&image.data)) {
-        // A GLB-embedded image, a `data:` URI inlined by LoadExternalImages, or
-        // an image backed by a buffer view: the payload is already in memory.
+        // A GLB-embedded image, a `data:` URI (fastgltf decodes those itself),
+        // or an image backed by a buffer view: the payload is already in memory.
         ref.source = GltfImageRef::Source::Embedded;
         ref.mime_type = MimeName(array->mimeType);
         ref.embedded_bytes.assign(array->bytes.begin(), array->bytes.end());
