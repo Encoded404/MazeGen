@@ -53,6 +53,20 @@ std::uint64_t OverrideSignature(const std::uint64_t tag,
     return h;
 }
 
+// The entity's Transform as the TRS value the per-submesh composition and the
+// DynamicEntry mirror both use. An absent transform means identity placement.
+SubMeshTransform ToSubMeshTransform(const Components::Transform* transform) {
+    SubMeshTransform out{};
+    if (transform == nullptr) return out;
+    out.position = MeshVertexVec3{transform->position.x, transform->position.y, transform->position.z};
+    out.rotation[0] = transform->rotation.x;
+    out.rotation[1] = transform->rotation.y;
+    out.rotation[2] = transform->rotation.z;
+    out.rotation[3] = transform->rotation.w;
+    out.scale = MeshVertexVec3{transform->scale.x, transform->scale.y, transform->scale.z};
+    return out;
+}
+
 // Material chosen for one object-local submesh, after applying (and validating)
 // any per-object MaterialOverride. `technique` is the material's own technique
 // and is never mixed with a different material's packing.
@@ -404,9 +418,7 @@ void MeshRenderSystem::ProcessFrame(ComponentRegistry& registry,
             gpu_info->vertex_allocation.offset / sizeof(StandardMeshPipeline::Vertex));
         const std::uint32_t index_buf_slot = gpu_info->index_allocation.buffer_index;
 
-        const auto pos = e.transform ? e.transform->position : glm::vec3(0);
-        const auto scale = e.transform ? e.transform->scale : glm::vec3(1);
-        const glm::quat rot = e.transform ? e.transform->rotation : glm::quat{1.0f, 0.0f, 0.0f, 0.0f};
+        const SubMeshTransform entity_transform = ToSubMeshTransform(e.transform);
 
         // Per-object ORM override: values multiply with the material's ORM texture.
         // The component applies to all submeshes of the entity; when absent, each
@@ -450,10 +462,19 @@ void MeshRenderSystem::ProcessFrame(ComponentRegistry& registry,
                 orm_metallic = mat.metallic_factor;
             }
 
+            // The entity transform places the mesh; this submesh's asset-side
+            // transform places it inside the mesh (for glTF, the node's baked
+            // world transform). Composing the two is what keeps a flattened node
+            // hierarchy a single mesh without duplicating geometry, and it is the
+            // only per-submesh transform source today.
+            const SubMeshTransform placement =
+                ComposeSubmeshTransform(entity_transform, sm.transform);
+
             if (auto* d = static_cast<DynamicEntry*>(frame_blocks.dynamic_entries->Get(ci))) {
-                d->px = pos.x; d->py = pos.y; d->pz = pos.z; d->pad0 = 0;
-                d->sx = scale.x; d->sy = scale.y; d->sz = scale.z; d->pad1 = 0;
-                d->rx = rot.x; d->ry = rot.y; d->rz = rot.z; d->rw = rot.w;
+                d->px = placement.position.x; d->py = placement.position.y; d->pz = placement.position.z; d->pad0 = 0;
+                d->sx = placement.scale.x; d->sy = placement.scale.y; d->sz = placement.scale.z; d->pad1 = 0;
+                d->rx = placement.rotation[0]; d->ry = placement.rotation[1];
+                d->rz = placement.rotation[2]; d->rw = placement.rotation[3];
             }
 
             if (auto* s2 = static_cast<StaticEntry*>(frame_blocks.static_entries->Get(ci))) {
@@ -538,6 +559,7 @@ void MeshRenderSystem::ProcessFrame(ComponentRegistry& registry,
         const auto pos = e.transform ? e.transform->position : glm::vec3(0);
         const auto scale = e.transform ? e.transform->scale : glm::vec3(1);
         const glm::quat rot = e.transform ? e.transform->rotation : glm::quat{1.0f, 0.0f, 0.0f, 0.0f};
+        const SubMeshTransform entity_transform = ToSubMeshTransform(e.transform);
 
         LOGIFACE_LOG(trace, "ProcessFrame: dynamic mesh transform pos=(" +
                      std::to_string(pos.x) + "," + std::to_string(pos.y) + "," + std::to_string(pos.z) +
@@ -566,17 +588,21 @@ void MeshRenderSystem::ProcessFrame(ComponentRegistry& registry,
                 material_mgr, sm.material_id, material_override, s,
                 e.dyn_mesh->gpu_handle.id, e.dyn_mesh->submesh_count, entity_id);
 
+            const SubMeshTransform placement =
+                ComposeSubmeshTransform(entity_transform, sm.transform);
+
             {
                 auto* d = static_cast<DynamicEntry*>(frame_blocks.dynamic_entries->Get(ci));
                 if (d) {
                     LOGIFACE_LOG(trace, "ProcessFrame: writing dynamic_entries[" + std::to_string(ci) +
-                                 "] pos=(" + std::to_string(pos.x) + "," + std::to_string(pos.y) + "," + std::to_string(pos.z) +
-                                 ") scale=(" + std::to_string(scale.x) + "," + std::to_string(scale.y) + "," + std::to_string(scale.z) +
-                                 ") rot=(" + std::to_string(rot.x) + "," + std::to_string(rot.y) + "," + std::to_string(rot.z) + "," + std::to_string(rot.w) +
+                                 "] pos=(" + std::to_string(placement.position.x) + "," + std::to_string(placement.position.y) + "," + std::to_string(placement.position.z) +
+                                 ") scale=(" + std::to_string(placement.scale.x) + "," + std::to_string(placement.scale.y) + "," + std::to_string(placement.scale.z) +
+                                 ") rot=(" + std::to_string(placement.rotation[0]) + "," + std::to_string(placement.rotation[1]) + "," + std::to_string(placement.rotation[2]) + "," + std::to_string(placement.rotation[3]) +
                                  ")");
-                    d->px = pos.x; d->py = pos.y; d->pz = pos.z; d->pad0 = 0;
-                    d->sx = scale.x; d->sy = scale.y; d->sz = scale.z; d->pad1 = 0;
-                    d->rx = rot.x; d->ry = rot.y; d->rz = rot.z; d->rw = rot.w;
+                    d->px = placement.position.x; d->py = placement.position.y; d->pz = placement.position.z; d->pad0 = 0;
+                    d->sx = placement.scale.x; d->sy = placement.scale.y; d->sz = placement.scale.z; d->pad1 = 0;
+                    d->rx = placement.rotation[0]; d->ry = placement.rotation[1];
+                    d->rz = placement.rotation[2]; d->rw = placement.rotation[3];
                     LOGIFACE_LOG(trace, "ProcessFrame: written dynamic_entries[" + std::to_string(ci) +
                                  "] verify px=" + std::to_string(d->px) + " py=" + std::to_string(d->py) +
                                  " sx=" + std::to_string(d->sx) + " rx=" + std::to_string(d->rx));
