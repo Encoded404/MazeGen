@@ -457,4 +457,53 @@ TEST_F(GltfGeometryImportTest, PointsPrimitiveIsNotRenderableGeometry) {
     EXPECT_THROW((void)Assemble(path), std::runtime_error);
 }
 
+TEST_F(GltfGeometryImportTest, SharedMeshGeometryIsEmittedOnceAndPlacedPerNode) {
+    // glTF instances a mesh by referencing it from several nodes. One triangle
+    // referenced by three nodes must cost one copy of the geometry and three
+    // placements, not three copies.
+    const std::string json = R"json({
+  "asset": {"version": "2.0"},
+  "scene": 0,
+  "scenes": [{"nodes": [0, 1, 2]}],
+  "nodes": [
+    {"mesh": 0},
+    {"mesh": 0, "translation": [1.0, 0.0, 0.0]},
+    {"mesh": 0, "translation": [0.0, 2.0, 0.0]}
+  ],
+  "meshes": [{"primitives": [{"attributes": {"POSITION": 0}, "indices": 1, "mode": 4}]}],
+  "buffers": [{"byteLength": 42}],
+  "bufferViews": [
+    {"buffer": 0, "byteOffset": 0, "byteLength": 36, "target": 34962},
+    {"buffer": 0, "byteOffset": 36, "byteLength": 6, "target": 34963}
+  ],
+  "accessors": [
+    {"bufferView": 0, "componentType": 5126, "count": 3, "type": "VEC3"},
+    {"bufferView": 1, "componentType": 5123, "count": 3, "type": "SCALAR"}
+  ]
+})json";
+    std::vector<std::byte> bin;
+    AppendFloat(bin, 0.0f); AppendFloat(bin, 0.0f); AppendFloat(bin, 0.0f);
+    AppendFloat(bin, 1.0f); AppendFloat(bin, 0.0f); AppendFloat(bin, 0.0f);
+    AppendFloat(bin, 0.0f); AppendFloat(bin, 1.0f); AppendFloat(bin, 0.0f);
+    AppendU16(bin, 0); AppendU16(bin, 1); AppendU16(bin, 2);
+
+    const auto path = WriteFixture("shared_mesh.glb", MakeGlb(json, bin));
+    const std::shared_ptr<Mesh> mesh = Assemble(path);
+    ASSERT_NE(mesh, nullptr);
+
+    EXPECT_EQ(mesh->vertices.size(), 3u);
+    EXPECT_EQ(mesh->indices.size(), 3u);
+    ASSERT_EQ(mesh->subMeshes.size(), 3u);
+
+    // Every placement draws the same index range, over the same vertices...
+    for (const SubMesh& sm : mesh->subMeshes) {
+        EXPECT_EQ(sm.index_start, 0u);
+        EXPECT_EQ(sm.index_count, 3u);
+    }
+    // ...and carries only its own node transform.
+    ExpectVec3(mesh->subMeshes[0].transform.position, 0.0f, 0.0f, 0.0f);
+    ExpectVec3(mesh->subMeshes[1].transform.position, 1.0f, 0.0f, 0.0f);
+    ExpectVec3(mesh->subMeshes[2].transform.position, 0.0f, 2.0f, 0.0f);
+}
+
 } // namespace

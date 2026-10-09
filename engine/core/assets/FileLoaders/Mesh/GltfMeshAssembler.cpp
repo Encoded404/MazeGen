@@ -167,13 +167,25 @@ struct VertexKeyHash {
     return key;
 }
 
+// One primitive's geometry, emitted into the mesh exactly once no matter how
+// many nodes reference the mesh. Vertices and indices are shared; placement
+// lives on the per-node SubMesh copies made from this template.
+struct EmittedGeometry {
+    VulkanEngine::SubMesh submesh{}; // transform deliberately left identity
+    bool authored_tangents = false;  // the primitive carried TANGENT
+    bool authored_uv0 = false;       // the primitive carried TEXCOORD_0
+};
+
 struct ConversionState {
     const fastgltf::Asset& asset;
     const std::vector<VulkanEngine::MaterialId>* bindings = nullptr;
     VulkanEngine::Mesh& mesh;
-    // Parallel to mesh.subMeshes: whether that submesh's primitive authored
-    // TANGENT, so MikkTSpace only fills the ones that did not.
-    std::vector<bool> submesh_authored_tangents;
+    // One entry per emitted primitive. The ranges are disjoint, which also
+    // makes this the list tangent generation runs over: exactly once per range.
+    std::vector<EmittedGeometry> geometry;
+    // glTF mesh index -> the geometry entries it emitted, filled the first time
+    // a node references the mesh.
+    std::unordered_map<std::size_t, std::vector<std::size_t>> mesh_geometry;
     bool any_uv_authored = false;
     bool any_uv1 = false;
     bool warned_unsupported_mode = false;
@@ -261,9 +273,12 @@ struct ConversionState {
     return n;
 }
 
-void ConvertPrimitive(ConversionState& state,
-                      const fastgltf::Primitive& primitive,
-                      const SubMeshTransform& transform) {
+// Emits one primitive's geometry into the mesh and returns its index into
+// state.geometry, or nothing when the primitive has nothing to draw. The
+// placement transform is deliberately not applied here: the same geometry is
+// reused by every node that references the mesh, so it is stored unplaced.
+[[nodiscard]] std::optional<std::size_t> ConvertPrimitive(ConversionState& state,
+                                                          const fastgltf::Primitive& primitive) {
     auto& mesh = state.mesh;
     const auto& asset = state.asset;
 
@@ -274,12 +289,12 @@ void ConvertPrimitive(ConversionState& state,
 
     const auto position_it = primitive.findAttribute("POSITION");
     if (position_it == primitive.attributes.end()) {
-        return; // a primitive with no positions has nothing to draw
+        return std::nullopt; // a primitive with no positions has nothing to draw
     }
 
     const std::vector<fastgltf::math::fvec3> positions =
         ReadAccessor<fastgltf::math::fvec3>(asset, position_it->accessorIndex);
-    if (positions.empty()) return;
+    if (positions.empty()) return std::nullopt;
 
     const auto normal_it = primitive.findAttribute("NORMAL");
     const std::vector<fastgltf::math::fvec3> normals = normal_it != primitive.attributes.end()
@@ -325,7 +340,7 @@ void ConvertPrimitive(ConversionState& state,
             LOGIFACE_LOG(warn, "GltfMeshAssembler: skipping a non-triangle primitive "
                                "(only TRIANGLES, TRIANGLE_STRIP and TRIANGLE_FAN are supported)");
         }
-        return;
+        return std::nullopt;
     }
     triangles.resize(triangles.size() - (triangles.size() % 3U));
 
@@ -411,21 +426,22 @@ void ConvertPrimitive(ConversionState& state,
     }
 
     const std::uint32_t index_count = static_cast<std::uint32_t>(mesh.indices.size()) - index_start;
-    if (index_count == 0) return;
+    if (index_count == 0) return std::nullopt;
 
-    SubMesh submesh{};
-    submesh.index_start = index_start;
-    submesh.index_count = index_count;
-    submesh.material_id = material_id;
-    submesh.transform = transform;
-    mesh.subMeshes.push_back(submesh);
-    state.submesh_authored_tangents.push_back(has_tangents);
+    EmittedGeometry emitted{};
+    emitted.submesh.index_start = index_start;
+    emitted.submesh.index_count = index_count;
+    emitted.submesh.material_id = material_id;
+    emitted.authored_tangents = has_tangents;
+    emitted.authored_uv0 = has_uv0;
+    state.geometry.push_back(emitted);
+    return state.geometry.size() - 1U;
 }
 
 // Fills the tangent frame: the file's baked TANGENT where a primitive authored
-// one, MikkTSpace for the rest. Runs after every submesh exists, because
+// one, MikkTSpace for the rest. Runs after all geometry exists, because
 // MikkTSpace accumulates across shared vertices and must see the deduplicated
-// geometry. A mesh with no UV domain has no tangent space and gets none.
+// geometry, and once per emitted primitive rather than once per placed submesh.
 void FinalizeTangents(ConversionState& state) {
     auto& mesh = state.mesh;
     if (mesh.vertices.empty()) return;
@@ -436,13 +452,14 @@ void FinalizeTangents(ConversionState& state) {
         return;
     }
 
+    // One pass per emitted range. Node copies share their geometry, so running
+    // per submesh would regenerate identical tangents once per placement.
     bool all_generated = true;
-    for (std::size_t s = 0; s < mesh.subMeshes.size(); ++s) {
-        if (s < state.submesh_authored_tangents.size() && state.submesh_authored_tangents[s]) continue;
-        const SubMesh& submesh = mesh.subMeshes[s];
+    for (const EmittedGeometry& emitted : state.geometry) {
+        if (emitted.authored_tangents) continue;
         all_generated &= VulkanEngine::TangentGen::GenerateSubmeshTangents(
             mesh.vertices, mesh.normals, mesh.uvs, mesh.indices,
-            submesh.index_start, submesh.index_count,
+            emitted.submesh.index_start, emitted.submesh.index_count,
             mesh.tangents, mesh.tangent_handedness);
     }
     if (!all_generated) {
@@ -517,8 +534,24 @@ void ConvertAsset(const fastgltf::Asset& asset,
         }
 
         if (node.meshIndex.has_value() && *node.meshIndex < asset.meshes.size()) {
-            for (const fastgltf::Primitive& primitive : asset.meshes[*node.meshIndex].primitives) {
-                ConvertPrimitive(state, primitive, node_trs);
+            const std::size_t gltf_mesh = *node.meshIndex;
+            // glTF instances a mesh by referencing it from several nodes. The
+            // geometry is emitted once and then placed once per reference, so a
+            // mesh shared by eight pawns costs one copy, not eight.
+            auto cached = state.mesh_geometry.find(gltf_mesh);
+            if (cached == state.mesh_geometry.end()) {
+                std::vector<std::size_t> emitted;
+                for (const fastgltf::Primitive& primitive : asset.meshes[gltf_mesh].primitives) {
+                    if (const auto index = ConvertPrimitive(state, primitive)) {
+                        emitted.push_back(*index);
+                    }
+                }
+                cached = state.mesh_geometry.emplace(gltf_mesh, std::move(emitted)).first;
+            }
+            for (const std::size_t index : cached->second) {
+                VulkanEngine::SubMesh placed = state.geometry[index].submesh;
+                placed.transform = node_trs;
+                mesh.subMeshes.push_back(placed);
             }
         }
 
