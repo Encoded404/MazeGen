@@ -96,10 +96,11 @@ LoadedMeshData LoadMeshFromFile(const std::filesystem::path& models_dir,
                 LoadedMeshData data{};
                 for (const auto& v : mesh->vertices) { data.positions.push_back(v.x); data.positions.push_back(v.y); data.positions.push_back(v.z); }
                 for (const auto& n : mesh->normals) { data.normals.push_back(n.x); data.normals.push_back(n.y); data.normals.push_back(n.z); }
+                // Every UV set is stored in the engine's orientation: the V
+                // flip happens here, once, so all sets share one convention and
+                // consumers copy them verbatim.
                 for (const auto& uv : mesh->uvs) { data.uvs.push_back(uv.u); data.uvs.push_back(1.0f - uv.v); }
-                // UV1 is carried unflipped, as the importer reports it; ToMeshData
-                // applies the same V flip it applies to UV0.
-                for (const auto& uv : mesh->uv_extra[0]) { data.uv1.push_back(uv.u); data.uv1.push_back(uv.v); }
+                for (const auto& uv : mesh->uv_extra[0]) { data.uv1.push_back(uv.u); data.uv1.push_back(1.0f - uv.v); }
                 for (const auto& t : mesh->tangents) { data.tangents.push_back(t.x); data.tangents.push_back(t.y); data.tangents.push_back(t.z); }
                 data.tangent_handedness = mesh->tangent_handedness;
                 data.indices = mesh->indices;
@@ -126,10 +127,11 @@ LoadedMeshData LoadMeshFromFilePath(const std::filesystem::path& file_path,
             LoadedMeshData data{};
             for (const auto& v : mesh->vertices) { data.positions.push_back(v.x); data.positions.push_back(v.y); data.positions.push_back(v.z); }
             for (const auto& n : mesh->normals) { data.normals.push_back(n.x); data.normals.push_back(n.y); data.normals.push_back(n.z); }
+            // Every UV set is stored in the engine's orientation: the V flip
+            // happens here, once, so all sets share one convention and
+            // consumers copy them verbatim.
             for (const auto& uv : mesh->uvs) { data.uvs.push_back(uv.u); data.uvs.push_back(1.0f - uv.v); }
-            // UV1 is carried unflipped, as the importer reports it; ToMeshData
-            // applies the same V flip it applies to UV0.
-            for (const auto& uv : mesh->uv_extra[0]) { data.uv1.push_back(uv.u); data.uv1.push_back(uv.v); }
+            for (const auto& uv : mesh->uv_extra[0]) { data.uv1.push_back(uv.u); data.uv1.push_back(1.0f - uv.v); }
             for (const auto& t : mesh->tangents) { data.tangents.push_back(t.x); data.tangents.push_back(t.y); data.tangents.push_back(t.z); }
             data.tangent_handedness = mesh->tangent_handedness;
             data.indices = mesh->indices;
@@ -169,10 +171,11 @@ bool LoadAllMeshes(const std::filesystem::path& models_dir,
                 LoadedMeshData data{};
                 for (const auto& v : mesh->vertices) { data.positions.push_back(v.x); data.positions.push_back(v.y); data.positions.push_back(v.z); }
                 for (const auto& n : mesh->normals) { data.normals.push_back(n.x); data.normals.push_back(n.y); data.normals.push_back(n.z); }
+                // Every UV set is stored in the engine's orientation: the V
+                // flip happens here, once, so all sets share one convention and
+                // consumers copy them verbatim.
                 for (const auto& uv : mesh->uvs) { data.uvs.push_back(uv.u); data.uvs.push_back(1.0f - uv.v); }
-                // UV1 is carried unflipped, as the importer reports it; ToMeshData
-                // applies the same V flip it applies to UV0.
-                for (const auto& uv : mesh->uv_extra[0]) { data.uv1.push_back(uv.u); data.uv1.push_back(uv.v); }
+                for (const auto& uv : mesh->uv_extra[0]) { data.uv1.push_back(uv.u); data.uv1.push_back(1.0f - uv.v); }
                 for (const auto& t : mesh->tangents) { data.tangents.push_back(t.x); data.tangents.push_back(t.y); data.tangents.push_back(t.z); }
                 data.tangent_handedness = mesh->tangent_handedness;
                 data.indices = mesh->indices;
@@ -392,8 +395,9 @@ VulkanEngine::GpuResources::MeshData ToMeshData(
     result.vertices = ConvertToVertices(loaded);
     result.indices = loaded.indices;
     result.sub_meshes = loaded.submeshes;
-    // UV1 is parallel to the vertices (one float2 per vertex), flipped the same
-    // way as UV0 so both sets share the importer's orientation.
+    // UV1 arrives in the engine's orientation, exactly like the UV0 that
+    // ConvertToVertices copies out of `uvs`, so both are copied across
+    // verbatim. Flipping here as well would double-flip this set alone.
     if (loaded.uv1.size() >= loaded.positions.size() / 3U * 2U &&
         !loaded.uv1.empty()) {
         const std::size_t n = loaded.positions.size() / 3U;
@@ -401,7 +405,7 @@ VulkanEngine::GpuResources::MeshData ToMeshData(
         dst.resize(n);
         for (std::size_t i = 0; i < n; ++i) {
             dst[i].u = loaded.uv1[i * 2U + 0U];
-            dst[i].v = 1.0f - loaded.uv1[i * 2U + 1U];
+            dst[i].v = loaded.uv1[i * 2U + 1U];
         }
     }
     return result;

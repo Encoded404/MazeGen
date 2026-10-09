@@ -11,6 +11,7 @@ add_executable(engine_tests
   unlit_material_tests.cpp
   gltf_material_import_tests.cpp
   gltf_geometry_import_tests.cpp
+  scene_import_uv_tests.cpp
   mesh_transform_compose_tests.cpp
   transform_override_tests.cpp
   draw_key_bound_tests.cpp

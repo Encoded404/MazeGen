@@ -412,7 +412,7 @@ TEST_F(GltfGeometryImportTest, SecondUvSetAndAuthoredTangentsSurvive) {
     ASSERT_NE(mesh, nullptr);
 
     // UV1 is parallel to the vertices and carries the asset's values; the V flip
-    // happens later, on the way into MeshData.
+    // happens later, in SceneImport, on the way into LoadedMeshData.
     ASSERT_EQ(mesh->uv_extra[0].size(), 3u);
     EXPECT_NEAR(mesh->uv_extra[0][1].u, 0.3f, kEps);
     EXPECT_NEAR(mesh->uv_extra[0][2].v, 0.8f, kEps);

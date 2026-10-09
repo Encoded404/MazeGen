@@ -27,9 +27,12 @@ using MaterialManager::MaterialId;
 struct LoadedMeshData {
     std::vector<float> positions;
     std::vector<float> normals;
+    // UV coordinates in the engine's orientation: the importer's V is already
+    // flipped. Every set shares that convention — `uvs` as well as `uv1` — so
+    // consumers copy them verbatim rather than flipping per set.
     std::vector<float> uvs;
-    // Optional out-of-line UV1, interleaved (u,v) like `uvs` and parallel to
-    // `positions`. Empty when the source has no UV1.
+    // Optional out-of-line UV1, interleaved (u,v) like `uvs`, parallel to
+    // `positions`, and flipped the same way. Empty when the source has no UV1.
     std::vector<float> uv1;
     // MikkTSpace tangents (xyz, unnormalized ok) + handedness (+1/-1),
     // per-vertex, parallel to `normals`. May be empty when the mesh has no
