@@ -442,28 +442,62 @@ struct ConversionState {
 // one, MikkTSpace for the rest. Runs after all geometry exists, because
 // MikkTSpace accumulates across shared vertices and must see the deduplicated
 // geometry, and once per emitted primitive rather than once per placed submesh.
+//
+// No part of this discards file data. A primitive that cannot be generated from
+// — no UV domain, or a generator failure — keeps the zero tangent that already
+// means "no tangent space", and the tangents authored elsewhere in the mesh
+// survive it.
 void FinalizeTangents(ConversionState& state) {
     auto& mesh = state.mesh;
     if (mesh.vertices.empty()) return;
 
-    if (!state.any_uv_authored) {
-        mesh.tangents.clear();
-        mesh.tangent_handedness.clear();
-        return;
+    // EmitVertex stored a zero tangent and unit handedness per vertex already;
+    // hold that shape so a mesh can carry authored tangents beside generated
+    // ones.
+    mesh.tangents.resize(mesh.vertices.size(), MeshVertexVec3{0.0f, 0.0f, 0.0f});
+    mesh.tangent_handedness.resize(mesh.vertices.size(), 1.0f);
+
+    bool any_authored = false;
+    for (const EmittedGeometry& emitted : state.geometry) {
+        any_authored |= emitted.authored_tangents;
     }
 
-    // One pass per emitted range. Node copies share their geometry, so running
-    // per submesh would regenerate identical tangents once per placement.
-    bool all_generated = true;
-    for (const EmittedGeometry& emitted : state.geometry) {
-        if (emitted.authored_tangents) continue;
-        all_generated &= VulkanEngine::TangentGen::GenerateSubmeshTangents(
-            mesh.vertices, mesh.normals, mesh.uvs, mesh.indices,
-            emitted.submesh.index_start, emitted.submesh.index_count,
-            mesh.tangents, mesh.tangent_handedness);
+    if (state.any_uv_authored) {
+        // One pass per emitted range. Node copies share their geometry, so
+        // running per submesh would regenerate identical tangents per placement.
+        for (const EmittedGeometry& emitted : state.geometry) {
+            if (emitted.authored_tangents) continue;
+            // A primitive with no TEXCOORD_0 carries fabricated zero UVs; there
+            // is no tangent space to derive from them, so leave it at zero
+            // rather than feeding MikkTSpace a degenerate domain.
+            if (!emitted.authored_uv0) continue;
+            const SubMesh& submesh = emitted.submesh;
+            if (VulkanEngine::TangentGen::GenerateSubmeshTangents(
+                    mesh.vertices, mesh.normals, mesh.uvs, mesh.indices,
+                    submesh.index_start, submesh.index_count,
+                    mesh.tangents, mesh.tangent_handedness)) {
+                continue;
+            }
+            // The generator rejected this submesh. Only the values it would have
+            // derived are lost: its corners keep the zero tangent, and a bad
+            // submesh no longer costs the whole mesh its tangent frame.
+            LOGIFACE_LOG(warn, "GltfMeshAssembler: MikkTSpace rejected a submesh; its "
+                               "generated tangents are left at zero");
+            for (std::uint32_t i = 0; i < submesh.index_count; ++i) {
+                const std::uint32_t vertex = mesh.indices[submesh.index_start + i];
+                mesh.tangents[vertex] = MeshVertexVec3{0.0f, 0.0f, 0.0f};
+                mesh.tangent_handedness[vertex] = 1.0f;
+            }
+        }
     }
-    if (!all_generated) {
-        LOGIFACE_LOG(warn, "GltfMeshAssembler: MikkTSpace failed for submesh(es); tangents discarded");
+
+    // An all-zero stream says nothing the empty one does not; drop it so the
+    // "no tangent space" representation stays the single one the engine reads.
+    const bool any_tangent = any_authored ||
+        std::ranges::any_of(mesh.tangents, [](const MeshVertexVec3& t) {
+            return t.x != 0.0f || t.y != 0.0f || t.z != 0.0f;
+        });
+    if (!any_tangent) {
         mesh.tangents.clear();
         mesh.tangent_handedness.clear();
     }

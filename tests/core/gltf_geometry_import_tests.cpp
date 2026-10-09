@@ -546,4 +546,149 @@ TEST_F(GltfGeometryImportTest, GeometryLoadDoesNotDependOnImageFiles) {
     EXPECT_EQ(mesh->subMeshes.size(), 1u);
 }
 
+// ── a UV-less submesh beside one that has a tangent space ──────────────────
+
+// Two meshes in one file: mesh 0 is a UV-mapped triangle that may also author
+// TANGENT, mesh 1 is the same triangle with neither UVs nor tangents. The BIN
+// layout is fixed, so mesh 0's declaration is what varies.
+[[nodiscard]] std::vector<std::byte> UvAndUvLessBin() {
+    std::vector<std::byte> bin;
+    const auto triangle = [&bin]() {
+        AppendFloat(bin, 0.0f); AppendFloat(bin, 0.0f); AppendFloat(bin, 0.0f);
+        AppendFloat(bin, 1.0f); AppendFloat(bin, 0.0f); AppendFloat(bin, 0.0f);
+        AppendFloat(bin, 0.0f); AppendFloat(bin, 1.0f); AppendFloat(bin, 0.0f);
+    };
+    const auto normals = [&bin]() {
+        for (int i = 0; i < 3; ++i) { AppendFloat(bin, 0.0f); AppendFloat(bin, 0.0f); AppendFloat(bin, 1.0f); }
+    };
+    triangle(); normals();                                     // mesh 0: 0..71
+    // A non-degenerate UV triangle, so MikkTSpace has a real tangent space to
+    // derive when mesh 0 does not author TANGENT.
+    AppendFloat(bin, 0.0f); AppendFloat(bin, 0.0f);
+    AppendFloat(bin, 1.0f); AppendFloat(bin, 0.0f);
+    AppendFloat(bin, 0.0f); AppendFloat(bin, 1.0f);
+    for (int i = 0; i < 3; ++i) {                              // authored tangent + handedness
+        AppendFloat(bin, 1.0f); AppendFloat(bin, 0.0f); AppendFloat(bin, 0.0f); AppendFloat(bin, -1.0f);
+    }
+    AppendU16(bin, 0); AppendU16(bin, 1); AppendU16(bin, 2);   // 144..149
+    while (bin.size() % 4 != 0) bin.push_back(std::byte{0});
+    triangle(); normals();                                     // mesh 1: 152..223
+    AppendU16(bin, 0); AppendU16(bin, 1); AppendU16(bin, 2);
+    while (bin.size() % 4 != 0) bin.push_back(std::byte{0});
+    return bin;
+}
+
+[[nodiscard]] std::string UvAndUvLessJson(const std::size_t bin_length,
+                                          const bool authored_tangents) {
+    const std::string mesh0_attributes = authored_tangents
+        ? R"("POSITION": 0, "NORMAL": 1, "TEXCOORD_0": 2, "TANGENT": 3)"
+        : R"("POSITION": 0, "NORMAL": 1, "TEXCOORD_0": 2)";
+    return std::string(R"json({
+  "asset": {"version": "2.0"},
+  "scene": 0,
+  "scenes": [{"nodes": [0, 1]}],
+  "nodes": [{"mesh": 0}, {"mesh": 1}],
+  "meshes": [
+    {"primitives": [{"attributes": {)json") + mesh0_attributes + R"json(}, "indices": 4, "mode": 4}]},
+    {"primitives": [{"attributes": {"POSITION": 5, "NORMAL": 6}, "indices": 7, "mode": 4}]}
+  ],
+  "buffers": [{"byteLength": )json" + std::to_string(bin_length) + R"json(}],
+  "bufferViews": [
+    {"buffer": 0, "byteOffset": 0, "byteLength": 36, "target": 34962},
+    {"buffer": 0, "byteOffset": 36, "byteLength": 36, "target": 34962},
+    {"buffer": 0, "byteOffset": 72, "byteLength": 24, "target": 34962},
+    {"buffer": 0, "byteOffset": 96, "byteLength": 48, "target": 34962},
+    {"buffer": 0, "byteOffset": 144, "byteLength": 6, "target": 34963},
+    {"buffer": 0, "byteOffset": 152, "byteLength": 36, "target": 34962},
+    {"buffer": 0, "byteOffset": 188, "byteLength": 36, "target": 34962},
+    {"buffer": 0, "byteOffset": 224, "byteLength": 6, "target": 34963}
+  ],
+  "accessors": [
+    {"bufferView": 0, "componentType": 5126, "count": 3, "type": "VEC3"},
+    {"bufferView": 1, "componentType": 5126, "count": 3, "type": "VEC3"},
+    {"bufferView": 2, "componentType": 5126, "count": 3, "type": "VEC2"},
+    {"bufferView": 3, "componentType": 5126, "count": 3, "type": "VEC4"},
+    {"bufferView": 4, "componentType": 5123, "count": 3, "type": "SCALAR"},
+    {"bufferView": 5, "componentType": 5126, "count": 3, "type": "VEC3"},
+    {"bufferView": 6, "componentType": 5126, "count": 3, "type": "VEC3"},
+    {"bufferView": 7, "componentType": 5123, "count": 3, "type": "SCALAR"}
+  ]
+})json";
+}
+
+TEST_F(GltfGeometryImportTest, AuthoredTangentsSurviveWithoutAnyUvDomain) {
+    // TANGENT but no TEXCOORD_0 anywhere: there is no tangent space to derive,
+    // yet the file's authored tangent is still valid data and must be kept.
+    SinglePrimitiveSpec spec{};
+    spec.attributes_json = R"("POSITION": 0, "NORMAL": 1, "TANGENT": 2)";
+    spec.indices_accessor = 3u;
+    spec.accessors_json = R"(
+    {"bufferView": 0, "componentType": 5126, "count": 3, "type": "VEC3"},
+    {"bufferView": 1, "componentType": 5126, "count": 3, "type": "VEC3"},
+    {"bufferView": 2, "componentType": 5126, "count": 3, "type": "VEC4"},
+    {"bufferView": 3, "componentType": 5123, "count": 3, "type": "SCALAR"})";
+    spec.buffer_views_json = R"(
+    {"buffer": 0, "byteOffset": 0, "byteLength": 36, "target": 34962},
+    {"buffer": 0, "byteOffset": 36, "byteLength": 36, "target": 34962},
+    {"buffer": 0, "byteOffset": 72, "byteLength": 48, "target": 34962},
+    {"buffer": 0, "byteOffset": 120, "byteLength": 6, "target": 34963})";
+
+    std::vector<std::byte> bin;
+    AppendFloat(bin, 0.0f); AppendFloat(bin, 0.0f); AppendFloat(bin, 0.0f);
+    AppendFloat(bin, 1.0f); AppendFloat(bin, 0.0f); AppendFloat(bin, 0.0f);
+    AppendFloat(bin, 0.0f); AppendFloat(bin, 1.0f); AppendFloat(bin, 0.0f);
+    for (int i = 0; i < 3; ++i) { AppendFloat(bin, 0.0f); AppendFloat(bin, 0.0f); AppendFloat(bin, 1.0f); }
+    for (int i = 0; i < 3; ++i) {
+        AppendFloat(bin, 1.0f); AppendFloat(bin, 0.0f); AppendFloat(bin, 0.0f); AppendFloat(bin, -1.0f);
+    }
+    AppendU16(bin, 0); AppendU16(bin, 1); AppendU16(bin, 2);
+    spec.bin_length = static_cast<std::uint32_t>(bin.size());
+
+    const auto path = WriteFixture("tangent_no_uv.glb", MakeGlb(SinglePrimitiveJson(spec), bin));
+    const std::shared_ptr<Mesh> mesh = Assemble(path);
+    ASSERT_NE(mesh, nullptr);
+
+    ASSERT_EQ(mesh->tangents.size(), 3u);
+    ASSERT_EQ(mesh->tangent_handedness.size(), 3u);
+    ExpectVec3(mesh->tangents[0], 1.0f, 0.0f, 0.0f);
+    EXPECT_NEAR(mesh->tangent_handedness[0], -1.0f, kEps);
+}
+
+TEST_F(GltfGeometryImportTest, UvLessSubmeshKeepsTheOtherSubmeshAuthoredTangents) {
+    const std::vector<std::byte> bin = UvAndUvLessBin();
+    const auto path = WriteFixture("authored_next_to_uvless.glb",
+                                   MakeGlb(UvAndUvLessJson(bin.size(), true), bin));
+    const std::shared_ptr<Mesh> mesh = Assemble(path);
+    ASSERT_NE(mesh, nullptr);
+
+    ASSERT_EQ(mesh->subMeshes.size(), 2u);
+    ASSERT_EQ(mesh->tangents.size(), 6u);
+    ASSERT_EQ(mesh->tangent_handedness.size(), 6u);
+
+    // Mesh 0's authored tangent is untouched...
+    ExpectVec3(mesh->tangents[0], 1.0f, 0.0f, 0.0f);
+    EXPECT_NEAR(mesh->tangent_handedness[0], -1.0f, kEps);
+    // ...and the UV-less mesh keeps the zero tangent that means "no tangent
+    // space" rather than dragging the whole stream down with it.
+    ExpectVec3(mesh->tangents[3], 0.0f, 0.0f, 0.0f);
+    EXPECT_NEAR(mesh->tangent_handedness[3], 1.0f, kEps);
+}
+
+TEST_F(GltfGeometryImportTest, UvLessSubmeshDoesNotDiscardGeneratedTangents) {
+    const std::vector<std::byte> bin = UvAndUvLessBin();
+    // Mesh 0 authors no TANGENT, so its tangents are generated; the sibling
+    // that cannot be generated must not take them away.
+    const auto path = WriteFixture("generated_next_to_uvless.glb",
+                                   MakeGlb(UvAndUvLessJson(bin.size(), false), bin));
+    const std::shared_ptr<Mesh> mesh = Assemble(path);
+    ASSERT_NE(mesh, nullptr);
+
+    ASSERT_EQ(mesh->tangents.size(), 6u);
+    const auto length_of = [](const MeshVertexVec3& t) {
+        return std::sqrt(t.x * t.x + t.y * t.y + t.z * t.z);
+    };
+    EXPECT_GT(length_of(mesh->tangents[0]), 0.5f);
+    ExpectVec3(mesh->tangents[3], 0.0f, 0.0f, 0.0f);
+}
+
 } // namespace
