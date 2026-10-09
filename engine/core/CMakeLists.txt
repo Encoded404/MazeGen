@@ -169,6 +169,7 @@ target_sources(${ENGINE_TARGET} PRIVATE
     gpu/BlockArray.cpp
     assets/FileLoaders/Mesh/MeshLoaderBase.cpp
     assets/FileLoaders/Mesh/GltfMaterialImport.cpp
+    assets/FileLoaders/Mesh/GltfMeshAssembler.cpp
     assets/FileLoaders/Textures/TextureLoaders.cpp
     assets/FileLoaders/Textures/TextureLoaders.cppm
     assets/FileLoaders/Fonts/FontLoader.cpp

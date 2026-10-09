@@ -81,6 +81,7 @@ protected:
         } else if (HasMagic(buf_prefix, {kGlbMagic.begin(), kGlbMagic.end()})) {
             auto gltf_asm = std::make_shared<GltfMeshAssembler>();
             gltf_asm->SetMaterialBindings(material_bindings_);
+            gltf_asm->SetSourcePath(path);
             return gltf_asm->AssembleFromFullBuffer(std::move(buf_ptr)).get();
         } else {
             auto ext = LowerExtension(path);
@@ -91,6 +92,7 @@ protected:
             } else if (ext == ".gltf" || ext == ".glb") {
                 auto gltf_asm = std::make_shared<GltfMeshAssembler>();
                 gltf_asm->SetMaterialBindings(material_bindings_);
+                gltf_asm->SetSourcePath(path);
                 return gltf_asm->AssembleFromFullBuffer(std::move(buf_ptr)).get();
             } else {
                 throw std::runtime_error("MeshMagicLoader: Unknown mesh format for file: " + path.string());

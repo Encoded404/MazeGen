@@ -97,6 +97,9 @@ LoadedMeshData LoadMeshFromFile(const std::filesystem::path& models_dir,
                 for (const auto& v : mesh->vertices) { data.positions.push_back(v.x); data.positions.push_back(v.y); data.positions.push_back(v.z); }
                 for (const auto& n : mesh->normals) { data.normals.push_back(n.x); data.normals.push_back(n.y); data.normals.push_back(n.z); }
                 for (const auto& uv : mesh->uvs) { data.uvs.push_back(uv.u); data.uvs.push_back(1.0f - uv.v); }
+                // UV1 is carried unflipped, as the importer reports it; ToMeshData
+                // applies the same V flip it applies to UV0.
+                for (const auto& uv : mesh->uv_extra[0]) { data.uv1.push_back(uv.u); data.uv1.push_back(uv.v); }
                 for (const auto& t : mesh->tangents) { data.tangents.push_back(t.x); data.tangents.push_back(t.y); data.tangents.push_back(t.z); }
                 data.tangent_handedness = mesh->tangent_handedness;
                 data.indices = mesh->indices;
@@ -124,6 +127,9 @@ LoadedMeshData LoadMeshFromFilePath(const std::filesystem::path& file_path,
             for (const auto& v : mesh->vertices) { data.positions.push_back(v.x); data.positions.push_back(v.y); data.positions.push_back(v.z); }
             for (const auto& n : mesh->normals) { data.normals.push_back(n.x); data.normals.push_back(n.y); data.normals.push_back(n.z); }
             for (const auto& uv : mesh->uvs) { data.uvs.push_back(uv.u); data.uvs.push_back(1.0f - uv.v); }
+            // UV1 is carried unflipped, as the importer reports it; ToMeshData
+            // applies the same V flip it applies to UV0.
+            for (const auto& uv : mesh->uv_extra[0]) { data.uv1.push_back(uv.u); data.uv1.push_back(uv.v); }
             for (const auto& t : mesh->tangents) { data.tangents.push_back(t.x); data.tangents.push_back(t.y); data.tangents.push_back(t.z); }
             data.tangent_handedness = mesh->tangent_handedness;
             data.indices = mesh->indices;
@@ -164,6 +170,9 @@ bool LoadAllMeshes(const std::filesystem::path& models_dir,
                 for (const auto& v : mesh->vertices) { data.positions.push_back(v.x); data.positions.push_back(v.y); data.positions.push_back(v.z); }
                 for (const auto& n : mesh->normals) { data.normals.push_back(n.x); data.normals.push_back(n.y); data.normals.push_back(n.z); }
                 for (const auto& uv : mesh->uvs) { data.uvs.push_back(uv.u); data.uvs.push_back(1.0f - uv.v); }
+                // UV1 is carried unflipped, as the importer reports it; ToMeshData
+                // applies the same V flip it applies to UV0.
+                for (const auto& uv : mesh->uv_extra[0]) { data.uv1.push_back(uv.u); data.uv1.push_back(uv.v); }
                 for (const auto& t : mesh->tangents) { data.tangents.push_back(t.x); data.tangents.push_back(t.y); data.tangents.push_back(t.z); }
                 data.tangent_handedness = mesh->tangent_handedness;
                 data.indices = mesh->indices;
