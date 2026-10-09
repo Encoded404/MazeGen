@@ -340,6 +340,7 @@ if(CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
             components/DynamicMesh.cppm
             components/OrmOverride.cppm
             components/MaterialOverride.cppm
+            components/TransformOverride.cppm
             assets/FileLoaders/Mesh/BinMeshAssembler.cppm
             assets/FileLoaders/Mesh/GltfMaterialImport.cppm
             assets/FileLoaders/Mesh/GltfMeshAssembler.cppm

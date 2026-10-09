@@ -10,6 +10,7 @@ export import VulkanEngine.Components.Transform;
 export import VulkanEngine.Components.MeshReference;
 export import VulkanEngine.Components.DynamicMesh;
 export import VulkanEngine.Components.MaterialOverride;
+export import VulkanEngine.Components.TransformOverride;
 export import VulkanEngine.MeshRegistry;
 export import VulkanEngine.MeshManager;
 export import VulkanEngine.SceneRenderer;

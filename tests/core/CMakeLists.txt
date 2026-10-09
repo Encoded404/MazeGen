@@ -12,6 +12,7 @@ add_executable(engine_tests
   gltf_material_import_tests.cpp
   gltf_geometry_import_tests.cpp
   mesh_transform_compose_tests.cpp
+  transform_override_tests.cpp
   draw_key_bound_tests.cpp
   draw_group_tests.cpp
   variant_pipeline_state_tests.cpp

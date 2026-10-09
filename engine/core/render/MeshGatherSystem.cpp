@@ -21,6 +21,7 @@ import VulkanEngine.Components.MeshReference;
 import VulkanEngine.Components.DynamicMesh;
 import VulkanEngine.Components.OrmOverride;
 import VulkanEngine.Components.MaterialOverride;
+import VulkanEngine.Components.TransformOverride;
 import VulkanEngine.MeshRegistry;
 import VulkanEngine.MeshManager;
 import VulkanEngine.SceneRenderer;
@@ -65,6 +66,33 @@ SubMeshTransform ToSubMeshTransform(const Components::Transform* transform) {
     out.rotation[3] = transform->rotation.w;
     out.scale = MeshVertexVec3{transform->scale.x, transform->scale.y, transform->scale.z};
     return out;
+}
+
+// Reports a transform-override discrepancy once per (cause, mesh, entity), the
+// same once-per-problem shape the material override diagnostics use. The
+// resolver stays pure; turning its status into a log is the gather's job.
+void ReportTransformOverrideIssue(const Components::TransformOverrideStatus status,
+                                  Components::TransformOverride* override_component,
+                                  const std::uint32_t mesh_id,
+                                  const std::uint64_t entity_id) {
+    if (override_component == nullptr) return;
+    switch (status) {
+        case Components::TransformOverrideStatus::MeshMismatch:
+            if (override_component->ShouldReport(OverrideSignature(3, mesh_id, entity_id))) {
+                LOGIFACE_LOG(warn, "MeshRenderSystem: TransformOverride was authored for mesh " +
+                             std::to_string(override_component->mesh_id) + " but is attached to mesh " +
+                             std::to_string(mesh_id) + "; the override is ignored");
+            }
+            break;
+        case Components::TransformOverrideStatus::RangeTooLarge:
+            if (override_component->ShouldReport(OverrideSignature(4, mesh_id, entity_id))) {
+                LOGIFACE_LOG(warn, "MeshRenderSystem: TransformOverride names more submeshes than mesh " +
+                             std::to_string(mesh_id) + " has; the override is ignored");
+            }
+            break;
+        default:
+            break;
+    }
 }
 
 // Material chosen for one object-local submesh, after applying (and validating)
@@ -425,9 +453,11 @@ void MeshRenderSystem::ProcessFrame(ComponentRegistry& registry,
         // submesh falls back to its material's own factors (resolved per submesh).
         const Components::OrmOverride* orm_override = nullptr;
         Components::MaterialOverride* material_override = nullptr;
+        Components::TransformOverride* transform_override = nullptr;
         if (e.entity != nullptr) {
             orm_override = e.entity->GetComponent<Components::OrmOverride>();
             material_override = e.entity->GetComponent<Components::MaterialOverride>();
+            transform_override = e.entity->GetComponent<Components::TransformOverride>();
         }
         const std::uint64_t entity_id = e.entity != nullptr
             ? static_cast<std::uint64_t>(e.entity->GetId().index)
@@ -462,13 +492,18 @@ void MeshRenderSystem::ProcessFrame(ComponentRegistry& registry,
                 orm_metallic = mat.metallic_factor;
             }
 
-            // The entity transform places the mesh; this submesh's asset-side
-            // transform places it inside the mesh (for glTF, the node's baked
-            // world transform). Composing the two is what keeps a flattened node
-            // hierarchy a single mesh without duplicating geometry, and it is the
-            // only per-submesh transform source today.
-            const SubMeshTransform placement =
-                ComposeSubmeshTransform(entity_transform, sm.transform);
+            // The entity transform places the mesh; this submesh's own transform
+            // places it inside the mesh (for glTF, the node's baked world
+            // transform), unless a per-object override names it. Composing is
+            // what keeps a flattened node hierarchy a single mesh without
+            // duplicating geometry.
+            const Components::EffectiveSubmeshTransform resolved =
+                Components::ResolveEffectiveSubmeshTransform(
+                    entity_transform, sm.transform, transform_override, s,
+                    e.mesh_ref->loaded_mesh_id, loaded->submesh_count);
+            ReportTransformOverrideIssue(resolved.status, transform_override,
+                                         e.mesh_ref->loaded_mesh_id, entity_id);
+            const SubMeshTransform& placement = resolved.transform;
 
             if (auto* d = static_cast<DynamicEntry*>(frame_blocks.dynamic_entries->Get(ci))) {
                 d->px = placement.position.x; d->py = placement.position.y; d->pz = placement.position.z; d->pad0 = 0;
@@ -571,10 +606,12 @@ void MeshRenderSystem::ProcessFrame(ComponentRegistry& registry,
         // mesh fingerprint (dynamic meshes have no MeshRegistry id).
         const Components::OrmOverride* orm_override = nullptr;
         Components::MaterialOverride* material_override = nullptr;
+        Components::TransformOverride* transform_override = nullptr;
         std::uint64_t entity_id = 0ull;
         if (e.entity != nullptr) {
             orm_override = e.entity->GetComponent<Components::OrmOverride>();
             material_override = e.entity->GetComponent<Components::MaterialOverride>();
+            transform_override = e.entity->GetComponent<Components::TransformOverride>();
             entity_id = static_cast<std::uint64_t>(e.entity->GetId().index);
         }
 
@@ -588,8 +625,13 @@ void MeshRenderSystem::ProcessFrame(ComponentRegistry& registry,
                 material_mgr, sm.material_id, material_override, s,
                 e.dyn_mesh->gpu_handle.id, e.dyn_mesh->submesh_count, entity_id);
 
-            const SubMeshTransform placement =
-                ComposeSubmeshTransform(entity_transform, sm.transform);
+            const Components::EffectiveSubmeshTransform resolved =
+                Components::ResolveEffectiveSubmeshTransform(
+                    entity_transform, sm.transform, transform_override, s,
+                    e.dyn_mesh->gpu_handle.id, e.dyn_mesh->submesh_count);
+            ReportTransformOverrideIssue(resolved.status, transform_override,
+                                         e.dyn_mesh->gpu_handle.id, entity_id);
+            const SubMeshTransform& placement = resolved.transform;
 
             {
                 auto* d = static_cast<DynamicEntry*>(frame_blocks.dynamic_entries->Get(ci));
