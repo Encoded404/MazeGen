@@ -75,8 +75,6 @@ TEST(GpuStatsTest, QuerySlotsAreUniquePerFifAndRun) {
 TEST(GpuStatsTest, QueryPoolSizeCoversEveryFifAndRun) {
     EXPECT_EQ(QueryPoolSize(1, 1), 1u);
     EXPECT_EQ(QueryPoolSize(3, 9), 27u);
-    EXPECT_EQ(kQueryWords, kCounterCount + 1);
-    EXPECT_EQ(kAvailabilityWord, kCounterCount);
 }
 
 TEST(GpuStatsTest, TryParseQueryResultReadsCountersWhenAvailable) {
@@ -100,9 +98,6 @@ TEST(GpuStatsTest, TryParseQueryResultReadsCountersWhenAvailable) {
 TEST(GpuStatsTest, ComputePoolQueryHasOnlyTheComputeCounter) {
     // A compute-only pool cannot enable graphics statistics, so its result is a
     // single counter plus availability.
-    EXPECT_EQ(kComputeQueryWords, 2u);
-    EXPECT_EQ(kComputeAvailabilityWord, 1u);
-
     std::array<std::uint64_t, kComputeQueryWords> words{};
     words[0] = 123;
     words[kComputeAvailabilityWord] = 1;

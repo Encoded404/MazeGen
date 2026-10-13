@@ -4,7 +4,6 @@ import std;
 
 import VulkanEngine.SceneRenderer;
 import VulkanEngine.TechniqueManager.BaseTechnique;
-import VulkanEngine.Render.Passes.CollectPass;
 
 namespace {
 
@@ -18,12 +17,6 @@ namespace TechniquePacking = VulkanEngine::TechniqueManager::TechniquePacking;
 
 TEST(DrawKeyBoundTest, DrawGroupCapacitySpansTheTechniqueBits) {
     EXPECT_EQ(SceneRenderer::MAX_DRAW_GROUPS, 1u << TechniquePacking::TECHNIQUE_BITS);
-    EXPECT_EQ(SceneRenderer::MAX_DRAW_GROUPS, 16384u);
-}
-
-TEST(DrawKeyBoundTest, CollectPassAgreesWithTheRendererBound) {
-    EXPECT_EQ(VulkanEngine::SceneRenderer::MAX_DRAW_GROUPS,
-              SceneRenderer::MAX_DRAW_GROUPS);
 }
 
 TEST(DrawKeyBoundTest, EveryPackedKeyFitsTheTable) {

@@ -304,16 +304,57 @@ TEST_F(GltfGeometryImportTest, TriangleStripIsTriangulated) {
 
     // An even triangle keeps the source winding; an odd one swaps its first two
     // corners, so a strip [0,1,2,3] becomes (p0,p1,p2) and (p2,p1,p3). Without
-    // normals the face normal is per-triangle, so corners are not shared and the
-    // indices are sequential: the winding shows up in the emitted vertex order.
+    // normals the face normal is per-triangle, so corners are not shared — the
+    // corner pairing and winding are the contract, the emitted order is not.
     ASSERT_EQ(mesh->indices.size(), 6u);
     ASSERT_EQ(mesh->vertices.size(), 6u);
-    ExpectVec3(mesh->vertices[0], 0.0f, 0.0f, 0.0f);
-    ExpectVec3(mesh->vertices[1], 1.0f, 0.0f, 0.0f);
-    ExpectVec3(mesh->vertices[2], 0.0f, 1.0f, 0.0f);
-    ExpectVec3(mesh->vertices[3], 0.0f, 1.0f, 0.0f);
-    ExpectVec3(mesh->vertices[4], 1.0f, 0.0f, 0.0f);
-    ExpectVec3(mesh->vertices[5], 1.0f, 1.0f, 0.0f);
+
+    constexpr std::array<std::array<float, 2>, 3> kFirst{{{{0.0f, 0.0f}}, {{1.0f, 0.0f}}, {{0.0f, 1.0f}}}};
+    constexpr std::array<std::array<float, 2>, 3> kSecond{{{{0.0f, 1.0f}}, {{1.0f, 0.0f}}, {{1.0f, 1.0f}}}};
+
+    const auto is_permutation_of = [&mesh](std::uint32_t i0, std::uint32_t i1, std::uint32_t i2,
+                                           const std::array<std::array<float, 2>, 3>& corners) {
+        std::array<bool, 3> used{false, false, false};
+        for (const std::uint32_t index : {i0, i1, i2}) {
+            bool matched = false;
+            for (std::size_t corner = 0; corner < 3; ++corner) {
+                if (!used[corner] &&
+                    std::fabs(mesh->vertices[index].x - corners[corner][0]) < 1e-6f &&
+                    std::fabs(mesh->vertices[index].y - corners[corner][1]) < 1e-6f) {
+                    used[corner] = true;
+                    matched = true;
+                    break;
+                }
+            }
+            if (!matched) {
+                return false;
+            }
+        }
+        return true;
+    };
+    const auto triangle_area = [&mesh](std::uint32_t a, std::uint32_t b, std::uint32_t c) {
+        const auto& va = mesh->vertices[a];
+        const auto& vb = mesh->vertices[b];
+        const auto& vc = mesh->vertices[c];
+        return 0.5f * ((vb.x - va.x) * (vc.y - va.y) - (vc.x - va.x) * (vb.y - va.y));
+    };
+
+    std::uint32_t first_triangles = 0;
+    std::uint32_t second_triangles = 0;
+    for (std::uint32_t tri = 0; tri < 2; ++tri) {
+        const std::uint32_t a = mesh->indices[3u * tri];
+        const std::uint32_t b = mesh->indices[3u * tri + 1u];
+        const std::uint32_t c = mesh->indices[3u * tri + 2u];
+        ASSERT_GT(triangle_area(a, b, c), 0.0f) << "strip winding must be preserved";
+        if (is_permutation_of(a, b, c, kFirst)) {
+            ++first_triangles;
+        }
+        if (is_permutation_of(a, b, c, kSecond)) {
+            ++second_triangles;
+        }
+    }
+    EXPECT_EQ(first_triangles, 1u);
+    EXPECT_EQ(second_triangles, 1u);
 }
 
 TEST_F(GltfGeometryImportTest, MissingNormalsGetFlatFaceNormals) {

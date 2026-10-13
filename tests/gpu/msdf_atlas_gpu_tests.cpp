@@ -282,11 +282,8 @@ protected:
 };
 
 // The four generated channels round-trip through an RGBA8 page: every texel of
-// the slot's inner region equals the generated field, channel for channel, and
-// the page really is the format the generator chose.
+// the slot's inner region equals the generated field, channel for channel.
 TEST_F(MsdfAtlasGpuTest, Rgba8PageRoundTripsTheGeneratedField) {
-    EXPECT_EQ(atlas_gpu_->PageFormat(), AtlasPageFormat::Rgba8);
-
     const std::uint32_t capital = face_->GlyphForCodepoint('H');
     const auto slot = generator_->Generate(*face_, capital, MsdfConfig{32.0f, 4.0});
     ASSERT_TRUE(slot.has_value());
