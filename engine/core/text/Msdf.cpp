@@ -42,6 +42,12 @@ struct DrawBuilder {
     msdfgen::Point2 start{};
     msdfgen::Point2 current{};
     bool open = false;
+    // Draw-work budget (HarfBuzz 14.5): the glyf/ot draw path spends from the
+    // counter this struct owns, bounding pathological fonts on the mesh
+    // thread. An exhausted budget surfaces as draw_glyph_or_fail returning
+    // false, which Draw() already treats as "no drawable outline".
+    int64_t budget = 0;
+    int64_t budget_remaining = 0;
 };
 
 void RecordEdge(const DrawBuilder& builder, OutlineEdgeKind kind) {
@@ -126,6 +132,27 @@ void ClosePath(hb_draw_funcs_t* /*dfuncs*/, void* draw_data, hb_draw_state_t* /*
     CloseContour(*static_cast<DrawBuilder*>(draw_data), true);
 }
 
+// ── Budget plumbing (HarfBuzz 14.5 hb-draw budget hooks) ────────────────────
+// HarfBuzz's own outline extraction spends from the live budget counter; these
+// three functions only expose DrawBuilder's policy and counter to it.
+
+hb_bool_t SetBudget(hb_draw_funcs_t* /*dfuncs*/, void* draw_data, int64_t budget,
+                    void* /*user_data*/) {
+    auto& builder = *static_cast<DrawBuilder*>(draw_data);
+    // Mirror upstream: negative policies other than DEFAULT clamp to zero.
+    builder.budget = (budget < 0 && budget != HB_BUDGET_DEFAULT) ? 0 : budget;
+    builder.budget_remaining = builder.budget; // set recharges the live budget
+    return true;
+}
+
+int64_t GetBudget(hb_draw_funcs_t* /*dfuncs*/, void* draw_data, void* /*user_data*/) {
+    return static_cast<DrawBuilder*>(draw_data)->budget;
+}
+
+int64_t* GetBudgetRemaining(hb_draw_funcs_t* /*dfuncs*/, void* draw_data, void* /*user_data*/) {
+    return &static_cast<DrawBuilder*>(draw_data)->budget_remaining;
+}
+
 } // namespace
 
 std::size_t GlyphOutline::EdgeCount() const noexcept {
@@ -138,6 +165,11 @@ std::size_t GlyphOutline::EdgeCount() const noexcept {
 
 struct HarfBuzzOutlineAdapter::Impl {
     hb_draw_funcs_t* funcs = nullptr;
+
+    // Generous per-glyph draw budget resolved from HB_BUDGET_DEFAULT policy:
+    // a real glyph has at most a few thousand points; a million draw units
+    // catches pathological fonts without ever limiting realistic ones.
+    static constexpr int64_t kDrawBudgetPerGlyph = 1'000'000;
 
     Impl() = default;
     ~Impl() {
@@ -160,6 +192,12 @@ struct HarfBuzzOutlineAdapter::Impl {
         DrawBuilder builder;
         builder.shape = &shape;
         builder.outline = outline;
+        // HB_BUDGET_DEFAULT resolves here to a generous per-glyph draw count;
+        // HarfBuzz spends from the counter as it extracts the outline, so a
+        // pathological font (millions of points) fails the draw - the glyph
+        // is skipped - instead of running unbounded worker work.
+        builder.budget = kDrawBudgetPerGlyph;
+        builder.budget_remaining = kDrawBudgetPerGlyph;
         const hb_bool_t drawn =
             hb_font_draw_glyph_or_fail(face.HarfBuzzFont(), glyph_id, funcs, &builder);
         CloseContour(builder, false);
@@ -265,6 +303,9 @@ HarfBuzzOutlineAdapter::HarfBuzzOutlineAdapter() : impl_(std::make_unique<Impl>(
     hb_draw_funcs_set_quadratic_to_func(impl_->funcs, &QuadraticTo, nullptr, nullptr);
     hb_draw_funcs_set_cubic_to_func(impl_->funcs, &CubicTo, nullptr, nullptr);
     hb_draw_funcs_set_close_path_func(impl_->funcs, &ClosePath, nullptr, nullptr);
+    hb_draw_funcs_set_set_budget_func(impl_->funcs, &SetBudget, nullptr, nullptr);
+    hb_draw_funcs_set_get_budget_func(impl_->funcs, &GetBudget, nullptr, nullptr);
+    hb_draw_funcs_set_get_budget_remaining_func(impl_->funcs, &GetBudgetRemaining, nullptr, nullptr);
     // Immutable after the setters: HarfBuzz then allows the table to be used from
     // any thread at the same time, which is what makes one adapter shareable.
     hb_draw_funcs_make_immutable(impl_->funcs);
