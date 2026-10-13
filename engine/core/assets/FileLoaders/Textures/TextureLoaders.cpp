@@ -748,4 +748,72 @@ AlphaAnalysis AnalyzeAlpha(const std::vector<std::byte>& pixels) {
     return BuildKtxSubresources(texture.get(), data, static_cast<std::size_t>(data_size), error_message);
 }
 
+bool DecodeAstcToRgba8(TextureData& data, std::string* error_message) {
+    if (data.needs_transcode || data.blob.empty()) {
+        if (error_message != nullptr) {
+            *error_message = "DecodeAstcToRgba8 requires a native (non-Basis) KTX2 payload";
+        }
+        return false;
+    }
+
+    ktxTexture* raw_texture = nullptr;
+    const auto* bytes = reinterpret_cast<const ktx_uint8_t*>(data.blob.data());
+    const auto size = static_cast<ktx_size_t>(data.blob.size());
+    // LOAD_IMAGE_DATA_BIT inflates Zstd/ZLIB supercompression; ASTC blocks are
+    // not supercompression, they are the sample format itself.
+    const KTX_error_code create_result =
+        ktxTexture_CreateFromMemory(bytes, size, KTX_TEXTURE_CREATE_LOAD_IMAGE_DATA_BIT, &raw_texture);
+    if (create_result != KTX_SUCCESS || raw_texture == nullptr) {
+        if (error_message != nullptr) {
+            *error_message = std::string("Failed to re-parse KTX2 ASTC payload: ") + ktxErrorString(create_result);
+        }
+        return false;
+    }
+    const KtxTexturePtr texture(raw_texture);
+    auto* texture2 = reinterpret_cast<ktxTexture2*>(texture.get());
+
+    const KTX_error_code decode_result = ktxTexture2_DecodeAstc(texture2);
+    if (decode_result != KTX_SUCCESS) {
+        if (error_message != nullptr) {
+            *error_message = std::string("Failed to CPU-decode KTX2 ASTC payload: ") + ktxErrorString(decode_result);
+        }
+        return false;
+    }
+
+    data.Reset();
+    data.width = texture->baseWidth;
+    data.height = texture->baseHeight;
+    data.depth = std::max<std::uint32_t>(texture->baseDepth, 1U);
+    data.mip_levels = texture->numLevels;
+    data.array_layers = std::max<std::uint32_t>(texture->numLayers, 1U);
+    data.face_count = texture->numFaces;
+    // The decoder picked the uncompressed variant from the DFD (sRGB transfer
+    // -> R8G8B8A8_SRGB, linear -> UNORM, float -> RGBA32F); report it verbatim.
+    data.source_format = static_cast<vk::Format>(texture2->vkFormat);
+    data.needs_transcode = false;
+
+    const ktx_size_t data_size = ktxTexture_GetDataSize(texture.get());
+    const auto* src = reinterpret_cast<const std::byte*>(ktxTexture_GetData(texture.get()));
+    if (src == nullptr || data_size == 0) {
+        if (error_message != nullptr) {
+            *error_message = "Decoded KTX2 texture contains no pixel data";
+        }
+        return false;
+    }
+    data.blob.assign(src, src + data_size);
+    if (!BuildKtxSubresources(texture.get(), data, static_cast<std::size_t>(data_size), error_message)) {
+        return false;
+    }
+    // The payload is now uncompressed RGBA8: capture the same alpha statistics
+    // the loader records for native RGBA8 payloads (material validation).
+    const vk::Format fmt = data.source_format;
+    if (fmt == vk::Format::eR8G8B8A8Unorm || fmt == vk::Format::eR8G8B8A8Srgb) {
+        const auto& base = data.subresources.front();
+        data.alpha_analysis = AnalyzeAlpha(std::vector<std::byte>(
+            data.blob.begin() + static_cast<std::ptrdiff_t>(base.offset),
+            data.blob.begin() + static_cast<std::ptrdiff_t>(base.offset + base.size)));
+    }
+    return true;
+}
+
 }  // namespace VulkanEngine::FileLoaders::Textures

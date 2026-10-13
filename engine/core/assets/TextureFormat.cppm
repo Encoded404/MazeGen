@@ -30,6 +30,7 @@ struct ResolvedFormat {
     vk::Format format{vk::Format::eUndefined}; // eUndefined = resolution failed
     bool reinterpreted{false};                 // same-bit sRGB/UNORM variant switch
     bool transcoded{false};                    // Basis -> BCn/RGBA8 transcode
+    bool decoded{false};                       // CPU ASTC -> RGBA8/float32 decode
 };
 
 // Color semantics: BaseColor, Emissive, UI, HDR. Data semantics: Normal, ORM,
@@ -47,6 +48,13 @@ struct ResolvedFormat {
 //     channel model; RGBA8/float16 when no BCn.
 //  6. Native BCn source without textureCompressionBC -> FAIL (no runtime
 //     decode).
+//  6b. Native ASTC without device ASTC support -> CPU-decode via libktx 4.4
+//     (ktxTexture2_DecodeAstc), targeting what that decoder produces from the
+//     DFD: float32 for HDR sources; R8G8B8A8 sRGB/UNORM mirroring the payload's
+//     transfer for color semantics and linear data semantics (decoded=true in
+//     the result, uploader calls DecodeAstcToRgba8). sRGB-transfer data
+//     semantics FAIL (the decoded bytes are gamma-encoded and no bit-compatible
+//     linear variant exists to reinterpret into).
 //  7. Never re-encode a native format; only same-bit sRGB/UNORM pairs.
 //  8. Normal encoding constrains the format: Standard allows BC5/2-channel;
 //     Full/Bent require >= 3 channels (2-channel transcode sources are forced

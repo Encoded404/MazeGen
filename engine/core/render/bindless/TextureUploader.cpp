@@ -210,6 +210,17 @@ void TextureUploader::WorkerLoop() {
                         ready.data, resolved.format, &ready.error)) {
                     ready.ok = false;
                 }
+            } else if (resolved.decoded) {
+                // Native ASTC payload without device ASTC support: CPU-decode
+                // on the worker thread (libktx 4.4). The decoder picks the
+                // uncompressed variant from the DFD, so the upload format is
+                // whatever it actually produced, not what the resolver guessed.
+                if (!VulkanEngine::FileLoaders::Textures::DecodeAstcToRgba8(
+                        ready.data, &ready.error)) {
+                    ready.ok = false;
+                } else {
+                    ready.format = ready.data.source_format;
+                }
             } else {
                 // Fill in a CPU mip chain for uncompressed sources without one.
                 (void)VulkanEngine::FileLoaders::Textures::GenerateCpuMipChain(ready.data);

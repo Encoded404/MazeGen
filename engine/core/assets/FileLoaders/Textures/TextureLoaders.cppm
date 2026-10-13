@@ -46,6 +46,15 @@ using VulkanEngine::Textures::TextureData;
                                            vk::Format target_format,
                                            std::string* error_message = nullptr);
 
+// CPU-decodes a native-ASTC KTX2 payload (loaded by LoadKtxTextureFromBuffer
+// as a passthrough blob; no device ASTC support) to its uncompressed RGBA
+// form on the caller's thread, mirroring the Basis transcode path. The target
+// is chosen by libktx from the payload's DFD: float samples -> R32G32B32A32
+// float, sRGB transfer -> R8G8B8A8_SRGB, linear -> R8G8B8A8_UNORM. `data` is
+// rewritten with the decoded subresource table; data.source_format holds the
+// authoritative decoded format after a true return.
+[[nodiscard]] bool DecodeAstcToRgba8(TextureData& data, std::string* error_message = nullptr);
+
 // Emits a full CPU mip chain (2x2 box filter) below the base level for an
 // uncompressed, single-subresource, RGBA8 source that has none. Returns false
 // when the source already has a chain or is not eligible (compressed/HDR/

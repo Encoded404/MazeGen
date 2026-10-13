@@ -43,6 +43,10 @@ constexpr std::array<FormatVariantPair, 14> kVariantPairs{{
     return format >= vk::Format::eBc1RgbUnormBlock && format <= vk::Format::eBc7SrgbBlock;
 }
 
+[[nodiscard]] bool IsAstcCompressed(vk::Format format) {
+    return format >= vk::Format::eAstc4x4UnormBlock && format <= vk::Format::eAstc12x12SrgbBlock;
+}
+
 [[nodiscard]] bool IsUncompressed8Bit(vk::Format format) {
     switch (format) {
         case vk::Format::eR8Unorm:
@@ -139,6 +143,35 @@ ResolvedFormat ResolveUploadFormat(const TextureSemantic semantic,
         }
         return {.format = wants_srgb ? vk::Format::eR8G8B8A8Srgb : vk::Format::eR8G8B8A8Unorm,
                 .reinterpreted = false, .transcoded = true};
+    }
+
+    // ── Native ASTC source ──
+    if (IsAstcCompressed(source)) {
+        if (caps.sampled(source) && caps.transfer_dst(source)) {
+            // ASTC4x4 has no same-bit UNORM sibling in the variant table, so
+            // the SrgbBlock keeps its transfer; a UNORM source keeps UNORM.
+            return {.format = source, .reinterpreted = false, .transcoded = false, .decoded = false};
+        }
+        // No ASTC hardware. libktx ships a CPU decoder (ktxTexture2_DecodeAstc,
+        // new public API in 4.4). Its target mirrors the DFD it reads: float
+        // samples -> R32G32B32A32_SFLOAT, sRGB transfer -> R8G8B8A8_SRGB,
+        // linear -> R8G8B8A8_UNORM. Mirror that here:
+        //   - float/HDR sources land in float32 (HDR never downconverts).
+        //   - color semantics match the decoder's transfer (sRGB block ->
+        //     _SRGB target, UNORM block -> _UNORM target).
+        //   - data semantics on an sRGB-transfer source fail honestly: the
+        //     decoded bytes are gamma-encoded and no bit-compatible linear
+        //     variant exists to reinterpret into.
+        if (hdr || source == vk::Format::eR32G32B32A32Sfloat) {
+            return {.format = vk::Format::eR32G32B32A32Sfloat,
+                    .reinterpreted = false, .transcoded = false, .decoded = true};
+        }
+        if (IsColorSemantic(semantic) || source == vk::Format::eAstc4x4UnormBlock) {
+            return {.format = source == vk::Format::eAstc4x4SrgbBlock ? vk::Format::eR8G8B8A8Srgb
+                                                                      : vk::Format::eR8G8B8A8Unorm,
+                    .reinterpreted = false, .transcoded = false, .decoded = true};
+        }
+        return {.format = vk::Format::eUndefined, .reinterpreted = false, .transcoded = false, .decoded = false};
     }
 
     // ── Native BCn source ──
