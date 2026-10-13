@@ -190,6 +190,17 @@ public:
                     }
                     break;
                 default:
+                    // SDL 3.4 exposes SDL_GetEventDescription for exactly this
+                    // case: name events the backend does not map yet (new
+                    // event types land between SDL releases) so hot-reload /
+                    // input surprises are diagnosable instead of silent.
+                    {
+                        std::array<char, 256> description{};
+                        SDL_GetEventDescription(&event, description.data(),
+                                                static_cast<int>(description.size()));
+                        LOGIFACE_LOG(trace, std::format("unhandled SDL event: {}",
+                                                        description.data()));
+                    }
                     break;
             }
         }

@@ -716,11 +716,13 @@ PhysicalCameraHandle PhysicalCameraSystem::Open(std::uint32_t device_index,
             return {};
         }
 
+        // SDL 3.4: SDL_GetCameraPermissionState returns the
+        // SDL_CameraPermissionState enum, not a bare int.
         const int permission = SDL_GetCameraPermissionState(camera);
-        if (permission == 1) {
+        if (permission == SDL_CAMERA_PERMISSION_STATE_APPROVED) {
             stream.state = PhysicalCameraState::Active;
             StartWorker(stream);
-        } else if (permission == 0) {
+        } else if (permission == SDL_CAMERA_PERMISSION_STATE_PENDING) {
             stream.state = PhysicalCameraState::AwaitingApproval;
         } else {
             stream.state = PhysicalCameraState::Error;
@@ -944,10 +946,10 @@ void PhysicalCameraSystem::Execute(vk::CommandBuffer cmd, std::uint32_t frame_in
         // Resolve async permission/approval states.
         if (stream.state == PhysicalCameraState::AwaitingApproval && stream.sdl_camera) {
             const int permission = SDL_GetCameraPermissionState(stream.sdl_camera);
-            if (permission == 1) {
+            if (permission == SDL_CAMERA_PERMISSION_STATE_APPROVED) {
                 stream.state = PhysicalCameraState::Active;
                 StartWorker(stream);
-            } else if (permission < 0) {
+            } else if (permission == SDL_CAMERA_PERMISSION_STATE_DENIED) {
                 stream.state = PhysicalCameraState::Error;
             }
         }
