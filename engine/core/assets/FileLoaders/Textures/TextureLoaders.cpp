@@ -5,6 +5,9 @@ module;
 #define STB_IMAGE_IMPLEMENTATION
 #include <stb_image.h>
 
+#define STB_IMAGE_RESIZE_IMPLEMENTATION
+#include <stb_image_resize2.h>
+
 module VulkanEngine.FileLoaders.TextureLoaders;
 
 import FileLoader.Types;
@@ -446,34 +449,37 @@ constexpr std::uint8_t kDfChannelAlpha = 15U;
     return false;
 }
 
-// 2x2 box-filter downsample of one RGBA8 image (the classic mip filter).
-void BoxDownsampleRgba8(const std::byte* src, std::uint32_t src_w, std::uint32_t src_h,
-                        std::byte* dst, std::uint32_t dst_w, std::uint32_t dst_h) {
-    for (std::uint32_t y = 0; y < dst_h; ++y) {
-        const std::uint32_t y0 = std::min(y * 2U, src_h - 1U);
-        const std::uint32_t y1 = std::min(y * 2U + 1U, src_h - 1U);
-        for (std::uint32_t x = 0; x < dst_w; ++x) {
-            const std::uint32_t x0 = std::min(x * 2U, src_w - 1U);
-            const std::uint32_t x1 = std::min(x * 2U + 1U, src_w - 1U);
-            for (std::uint32_t c = 0; c < 4U; ++c) {
-                const std::uint32_t sum =
-                    static_cast<std::uint32_t>(src[(y0 * src_w + x0) * 4U + c]) +
-                    static_cast<std::uint32_t>(src[(y0 * src_w + x1) * 4U + c]) +
-                    static_cast<std::uint32_t>(src[(y1 * src_w + x0) * 4U + c]) +
-                    static_cast<std::uint32_t>(src[(y1 * src_w + x1) * 4U + c]);
-                dst[(y * dst_w + x) * 4U + c] = static_cast<std::byte>(sum / 4U);
-            }
-        }
-    }
+// RGBA8 resample for CPU mip generation via stb_image_resize2.
+//
+// `srgb` selects the sRGB-aware pipeline: filtering happens on the linearized
+// signal so a 2x downsample is physically correct (the old 2x2 box filter
+// averaged gamma-encoded bytes, which is wrong per level — darkening/brightening
+// shifts in the mips). `alpha_weighted` selects alpha-weighted filtering, right
+// when channel 4 is transparency; data semantics whose 4th channel carries
+// unrelated content must pass false so the channels filter independently.
+bool ResampleRgba8(const std::byte* src, std::uint32_t src_w, std::uint32_t src_h,
+                   std::byte* dst, std::uint32_t dst_w, std::uint32_t dst_h,
+                   const bool srgb, const bool alpha_weighted) {
+    const auto* input = reinterpret_cast<const unsigned char*>(src);
+    auto* output = reinterpret_cast<unsigned char*>(dst);
+    const int stride = static_cast<int>(src_w) * 4;
+    const int dst_stride = static_cast<int>(dst_w) * 4;
+    const stbir_pixel_layout layout = alpha_weighted ? STBIR_RGBA : STBIR_4CHANNEL;
+    const unsigned char* result = srgb
+        ? stbir_resize_uint8_srgb(input, static_cast<int>(src_w), static_cast<int>(src_h), stride,
+                                  output, static_cast<int>(dst_w), static_cast<int>(dst_h), dst_stride,
+                                  layout)
+        : stbir_resize_uint8_linear(input, static_cast<int>(src_w), static_cast<int>(src_h), stride,
+                                    output, static_cast<int>(dst_w), static_cast<int>(dst_h), dst_stride,
+                                    layout);
+    return result == output; // NULL only on allocation failure; in-place writes return `output`
 }
 
 // Emits a full CPU mip chain below the decoded base level: each level is a
-// 2x2-box-filtered downsample of the previous one, block-tight and sequential
-// in `blob`. This is a simple box filter, not a production resampler; the
-// algorithm can be replaced later (a better filter, stb_image_resize2, or a GPU
-// blit chain) without changing this signature or its callers. This is a simple box filter, not a production resampler; the
-// algorithm can be replaced later (a better filter, stb_image_resize2, or a GPU
-// blit chain) without changing this signature or its callers.
+// resampled downsample of the previous one, block-tight and sequential in
+// `blob`. The resampler lives in stb_image_resize2 (see ResampleRgba8); both
+// callers are the loader and the upload worker. A GPU blit chain could later
+// replace this without changing the signature or its callers.
 void AppendCpuMipChain(std::uint32_t width, std::uint32_t height, TextureData& out) {
     const std::uint32_t max_dim = std::max({width, height});
     const std::uint32_t levels = static_cast<std::uint32_t>(std::bit_width(max_dim));
@@ -499,8 +505,9 @@ void AppendCpuMipChain(std::uint32_t width, std::uint32_t height, TextureData& o
 }  // namespace
 
 // Emits a full CPU mip chain for an uncompressed, single-subresource RGBA8
-// source that has none. Same 2x2 box filter the loader uses; exposed so the
-// async upload worker can complete a chain for sources that arrive without one.
+// source that has none. Same stb_image_resize2 chain the loader uses; exposed
+// so the async upload worker can complete a chain for sources that arrive
+// without one.
 [[nodiscard]] bool GenerateCpuMipChain(TextureData& data) {
     if (data.needs_transcode || data.is_hdr_source) {
         return false;  // compressed/HDR chains come from assets, never generated
@@ -520,6 +527,10 @@ void AppendCpuMipChain(std::uint32_t width, std::uint32_t height, TextureData& o
     if (levels <= 1U) {
         return false;
     }
+    // sRGB-encoded sources filter in linear space; the filter sees the alpha
+    // channel as transparency only when the DFD said there is one.
+    const bool srgb = data.source_format == vk::Format::eR8G8B8A8Srgb;
+    const bool alpha_weighted = data.source_alpha != 0;
     // Copy the base level out before the subresource table is rebuilt.
     const std::vector<std::byte> base = data.blob;
     AppendCpuMipChain(data.width, data.height, data);
@@ -528,8 +539,9 @@ void AppendCpuMipChain(std::uint32_t width, std::uint32_t height, TextureData& o
     for (std::uint32_t level = 1; level < data.mip_levels; ++level) {
         const auto& src = data.subresources[level - 1];
         auto& dst = data.subresources[level];
-        BoxDownsampleRgba8(data.blob.data() + src.offset, src.width, src.height,
-                           data.blob.data() + dst.offset, dst.width, dst.height);
+        (void)ResampleRgba8(data.blob.data() + src.offset, src.width, src.height,
+                            data.blob.data() + dst.offset, dst.width, dst.height,
+                            srgb, alpha_weighted);
     }
     data.mip_levels = levels;
     return true;
@@ -643,12 +655,17 @@ AlphaAnalysis AnalyzeAlpha(const std::vector<std::byte>& pixels) {
                 static_cast<std::size_t>(out.width) * out.height * 4U);
     stbi_image_free(pixels);
 
-    // Downsample the chain level by level from the resident base level.
+    // Downsample the chain level by level from the resident base level. stb
+    // decodes PNG/JPG into bytes whose encoding matches the file's intent but
+    // without tagging it, and the engine stores them in a UNORM format, so the
+    // resample stays in the stored (linear) space — same class of behaviour as
+    // the old box filter, with the better filter from stb_image_resize2.
     for (std::uint32_t level = 1; level < out.mip_levels; ++level) {
         const auto& src = out.subresources[level - 1];
         auto& dst = out.subresources[level];
-        BoxDownsampleRgba8(out.blob.data() + src.offset, src.width, src.height,
-                           out.blob.data() + dst.offset, dst.width, dst.height);
+        (void)ResampleRgba8(out.blob.data() + src.offset, src.width, src.height,
+                            out.blob.data() + dst.offset, dst.width, dst.height,
+                            /*srgb=*/false, /*alpha_weighted=*/out.source_alpha != 0);
     }
 
     out.alpha_analysis = AnalyzeAlpha(out.blob);
