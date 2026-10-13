@@ -9,7 +9,23 @@ import std.compat;
 
 import logiface;
 
+import VulkanShared.ScopedSection;
+
 namespace VulkanBackend::Vulkan {
+
+namespace {
+
+// Debug-level timing for the driver-level bootstrap steps. Sections live at
+// this orchestration level (not inside the backend methods) because
+// CreateSwapchain is also driven by RecreateSwapchain at runtime — a startup
+// section must not log on mid-run swapchain recreation.
+VulkanShared::ScopedSection DebugSection(const std::string& name) {
+    return VulkanShared::ScopedSection{name, [](const std::string& section, double ms) {
+        LOGIFACE_LOG(debug, section + ": " + std::to_string(ms) + " ms");
+    }};
+}
+
+} // anonymous namespace
 
 VulkanBootstrap::VulkanBootstrap(std::shared_ptr<IVulkanBootstrap> backend)
     : backend_(std::move(backend)) {}
@@ -28,7 +44,10 @@ bool VulkanBootstrap::Initialize(const VulkanBootstrapConfig& config) {
     snapshot_ = VulkanBootstrapState{};
     snapshot_.frames_in_flight = config_.frames_in_flight;
 
-    if (!backend_->CreateInstance(config_)) {
+    // Each step's scope is the if-statement: on success the section closes right
+    // after the step; on failure it also covers the in-branch partial shutdown
+    // before the false return.
+    if (auto s = DebugSection("engineinit.vulkan_instance"); !backend_->CreateInstance(config_)) {
         snapshot_.status = backend_->HasUnmetRequirements()
             ? BootstrapStatus::RequirementsUnmet
             : BootstrapStatus::InstanceCreationFailed;
@@ -38,7 +57,7 @@ bool VulkanBootstrap::Initialize(const VulkanBootstrapConfig& config) {
     }
     snapshot_.instance_ready = true;
 
-    if (!backend_->SelectPhysicalDevice()) {
+    if (auto s = DebugSection("engineinit.physical_device"); !backend_->SelectPhysicalDevice()) {
         snapshot_.status = backend_->HasUnmetRequirements()
             ? BootstrapStatus::RequirementsUnmet
             : BootstrapStatus::DeviceSelectionFailed;
@@ -47,7 +66,7 @@ bool VulkanBootstrap::Initialize(const VulkanBootstrapConfig& config) {
         return false;
     }
 
-    if (!backend_->CreateLogicalDevice(config_.frames_in_flight)) {
+    if (auto s = DebugSection("engineinit.vulkan_device"); !backend_->CreateLogicalDevice(config_.frames_in_flight)) {
         snapshot_.status = backend_->HasUnmetRequirements()
             ? BootstrapStatus::RequirementsUnmet
             : BootstrapStatus::DeviceCreationFailed;
@@ -58,7 +77,9 @@ bool VulkanBootstrap::Initialize(const VulkanBootstrapConfig& config) {
     snapshot_.device_ready = true;
 
     std::uint32_t swapchain_image_count = 0;
-    if (!backend_->CreateSwapchain(config_.preferred_swapchain_image_count, config_.present_mode, swapchain_image_count)) {
+    if (auto s = DebugSection("engineinit.swapchain");
+        !backend_->CreateSwapchain(config_.preferred_swapchain_image_count,
+                                   config_.present_mode, swapchain_image_count)) {
         snapshot_.status = BootstrapStatus::SwapchainCreationFailed;
         backend_->Shutdown();
         return false;

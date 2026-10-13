@@ -15,6 +15,7 @@ import VulkanEngine.MeshManager;
 import VulkanEngine.Components.DynamicMesh;
 import VulkanEngine.EngineBootstrap;
 import VulkanEngine.ShaderWatcher;
+import VulkanShared.ScopedSection;
 import VulkanShared.Storage;
 import VulkanShared.UserPaths;
 import VulkanEngine.TextureTypes;
@@ -28,6 +29,15 @@ import VulkanBackend.Vulkan.VulkanBootstrap;
 namespace VulkanEngine {
 
 namespace {
+
+// Same pattern as EngineBootstrap.cpp: an RAII timing scope that logs its wall
+// time at debug level. Kept local so GameEngine does not depend on the
+// bootstrap-internal helper.
+VulkanShared::ScopedSection DebugSection(const std::string& name) {
+    return VulkanShared::ScopedSection{name, [](const std::string& section, double ms) {
+        LOGIFACE_LOG(debug, section + ": " + std::to_string(ms) + " ms");
+    }};
+}
 
 // Content address for an image that arrived as bytes: identical embedded images
 // share one upload, and two different ones can never collide on a resource id.
@@ -279,12 +289,15 @@ bool GameEngine::InitRenderer(VulkanEngine::Application::ApplicationContext& ctx
         .submesh_count = 1u << 14,
     };
     ctx_.scene_renderer = std::make_unique<SceneRenderer::SceneRenderer>();
-    if (!ctx_.scene_renderer->Initialize(backend, ctx_.vertex_heap, initial_capacity,
-                                           ctx_.GetShaderManager(), ctx_.GetPipelineFactory(),
-                                           ctx_.GetShaderIds(), backend.GetFramesInFlight(),
-                                           config_.draw_mode)) {
-        LOGIFACE_LOG(error, "SceneRenderer::Initialize failed");
-        return false;
+    {
+        auto s = DebugSection("engineinit.scene_renderer");
+        if (!ctx_.scene_renderer->Initialize(backend, ctx_.vertex_heap, initial_capacity,
+                                             ctx_.GetShaderManager(), ctx_.GetPipelineFactory(),
+                                             ctx_.GetShaderIds(), backend.GetFramesInFlight(),
+                                             config_.draw_mode)) {
+            LOGIFACE_LOG(error, "SceneRenderer::Initialize failed");
+            return false;
+        }
     }
 
     ctx_.technique_mgr = std::make_unique<TechniqueManager::TechniqueManager>();
@@ -294,6 +307,7 @@ bool GameEngine::InitRenderer(VulkanEngine::Application::ApplicationContext& ctx
     config_.pipeline_config.draw_mode =
         static_cast<std::uint32_t>(ctx_.scene_renderer->GetDrawMode());
     {
+        auto s = DebugSection("engineinit.technique_manager");
         auto mesh_tech = std::make_unique<TechniqueManager::DefaultMeshTechnique>();
         // Interface-variant rows: slot 0 is the base pipeline; slot 1 is the
         // out-of-line UV1 entry-point pair. Both stages must be named main_uv1
@@ -319,8 +333,6 @@ bool GameEngine::InitRenderer(VulkanEngine::Application::ApplicationContext& ctx
         // The technique's base group (no render-state variant) is seeded at
         // registration and carries the technique id.
         main_draw_group_ = ctx_.technique_mgr->InternDrawGroup(tech_id.value, 0, 0);
-    }
-    {
         // Unlit technique: same engine sets + PerMaterial layout as the main
         // technique, but paired with the unlit fragment shader (no lighting).
         auto unlit_tech = std::make_unique<TechniqueManager::UnlitTextureTechnique>();
@@ -338,76 +350,87 @@ bool GameEngine::InitRenderer(VulkanEngine::Application::ApplicationContext& ctx
         ctx_.technique_mgr->Register(std::move(unlit_tech));
     }
 
-    ctx_.material_mgr.Initialize(&ctx_.staging_pool);
-    ctx_.material_mgr.SetTechniqueManager(ctx_.technique_mgr.get());
-
-    // Upload initial lighting data via staging
     {
-        SceneRenderer::SceneHeader header{};
-        header.ambient_color[0] = 0.03f; header.ambient_color[1] = 0.03f;
-        header.ambient_color[2] = 0.03f; header.ambient_color[3] = 1.0f;
-        header.sun_direction[0] = 0.5f; header.sun_direction[1] = -0.707f;
-        header.sun_direction[2] = 0.5f;
-        header.sun_color[0] = 1.0f; header.sun_color[1] = 0.95f;
-        header.sun_color[2] = 0.9f; header.sun_color[3] = 2.0f;
+        auto s = DebugSection("engineinit.material_manager");
+        ctx_.material_mgr.Initialize(&ctx_.staging_pool);
+        ctx_.material_mgr.SetTechniqueManager(ctx_.technique_mgr.get());
 
-        SceneRenderer::Light sun_light{};
-        sun_light.direction[0] = 0.5f; sun_light.direction[1] = -0.707f;
-        sun_light.direction[2] = 0.5f;
-        sun_light.color[0] = 1.0f; sun_light.color[1] = 0.95f;
-        sun_light.color[2] = 0.9f; sun_light.color[3] = 2.0f;
-        sun_light.position[3] = 0.0f; // type = directional
+        // Upload initial lighting data via staging
+        {
+            SceneRenderer::SceneHeader header{};
+            header.ambient_color[0] = 0.03f; header.ambient_color[1] = 0.03f;
+            header.ambient_color[2] = 0.03f; header.ambient_color[3] = 1.0f;
+            header.sun_direction[0] = 0.5f; header.sun_direction[1] = -0.707f;
+            header.sun_direction[2] = 0.5f;
+            header.sun_color[0] = 1.0f; header.sun_color[1] = 0.95f;
+            header.sun_color[2] = 0.9f; header.sun_color[3] = 2.0f;
 
-        std::array<SceneRenderer::Light, 1> lights = {sun_light};
-        header.light_count = 1;
-        ctx_.scene_renderer->UploadLighting(header, lights, ctx_.staging_pool);
+            SceneRenderer::Light sun_light{};
+            sun_light.direction[0] = 0.5f; sun_light.direction[1] = -0.707f;
+            sun_light.direction[2] = 0.5f;
+            sun_light.color[0] = 1.0f; sun_light.color[1] = 0.95f;
+            sun_light.color[2] = 0.9f; sun_light.color[3] = 2.0f;
+            sun_light.position[3] = 0.0f; // type = directional
+
+            std::array<SceneRenderer::Light, 1> lights = {sun_light};
+            header.light_count = 1;
+            ctx_.scene_renderer->UploadLighting(header, lights, ctx_.staging_pool);
+        }
+
+        // Register fallback material (ID 0): main technique, bindless checkerboard.
+        // The checkerboard uploads through the dedicated fallback path landing at
+        // bindless slot 0 (kFallbackSlot), never by allocation order, and its slot
+        // is never released.
+        ctx_.bindless_mgr->SetFallback(
+            GpuResources::GpuTexture::CreateFromTextureData(
+                backend, ctx_.image_heap, ctx_.missing_texture->GetData(),
+                vk::Format::eR8G8B8A8Unorm, SamplerDesc{}, &ctx_.sampler_cache),
+            ctx_.missing_texture->GetId());
+        const std::uint32_t fallback_slot = BindlessManager::kFallbackSlot;
+        [[maybe_unused]] auto fallback_handle =
+            ctx_.material_mgr.Register<TechniqueManager::DefaultMeshTechnique>(
+                MaterialManager::BlendMode::Opaque,
+                TechniqueManager::DefaultMeshPerMaterialData{
+                    .albedo_texture = fallback_slot,
+                    .roughness_factor = 1.0f,
+                    .metallic_factor = 0.0f,
+                    .ao_factor = 1.0f
+                });
     }
 
-    // Register fallback material (ID 0): main technique, bindless checkerboard.
-    // The checkerboard uploads through the dedicated fallback path landing at
-    // bindless slot 0 (kFallbackSlot), never by allocation order, and its slot
-    // is never released.
-    ctx_.bindless_mgr->SetFallback(
-        GpuResources::GpuTexture::CreateFromTextureData(
-            backend, ctx_.image_heap, ctx_.missing_texture->GetData(),
-            vk::Format::eR8G8B8A8Unorm, SamplerDesc{}, &ctx_.sampler_cache),
-        ctx_.missing_texture->GetId());
-    const std::uint32_t fallback_slot = BindlessManager::kFallbackSlot;
-    [[maybe_unused]] auto fallback_handle = ctx_.material_mgr.Register<TechniqueManager::DefaultMeshTechnique>(
-        MaterialManager::BlendMode::Opaque,
-        TechniqueManager::DefaultMeshPerMaterialData{
-            .albedo_texture = fallback_slot,
-            .roughness_factor = 1.0f,
-            .metallic_factor = 0.0f,
-            .ao_factor = 1.0f
+    {
+        auto s = DebugSection("engineinit.renderer");
+        ctx_.renderer = std::make_unique<Renderer::Renderer>();
+        ctx_.renderer->Initialize(*ctx.bootstrap, config_.renderer_config, *ctx_.scene_renderer,
+                                  &ctx_.GetShaderManager(), &ctx_.GetPipelineFactory(),
+                                  &ctx_.GetShaderIds());
+
+        // The text system's single submission entry point queues into the renderer's
+        // built-in text pass. Attaching it here -- after the renderer owns the pass,
+        // before the first frame records -- is the one seam that keeps submission
+        // one call without the text layer owning render-graph state. Until this
+        // runs, SubmitScreenText is deliberately a no-op.
+        if (ctx_.text_system && ctx_.renderer) {
+            ctx_.text_system->SetTextPass(ctx_.renderer->GetTextPass());
+        }
+
+        // Engine-standard descriptor set layouts let the renderer build custom-pass
+        // pipelines and layouts.
+        ctx_.renderer->SetEngineDescriptorSetLayouts(std::array<vk::DescriptorSetLayout, 5>{
+            *ctx_.bindless_mgr->GetLayout(),
+            *ctx_.scene_renderer->GetSubmeshVertexEntriesLayout(),
+            *ctx_.scene_renderer->GetVertexBuffersLayout(),
+            *ctx_.scene_renderer->GetIndirectionLayout(),
+            ctx_.scene_renderer->GetSceneUniformLayout(),
         });
-
-    ctx_.renderer = std::make_unique<Renderer::Renderer>();
-    ctx_.renderer->Initialize(*ctx.bootstrap, config_.renderer_config, *ctx_.scene_renderer,
-                              &ctx_.GetShaderManager(), &ctx_.GetPipelineFactory(),
-                              &ctx_.GetShaderIds());
-
-    // The text system's single submission entry point queues into the renderer's
-    // built-in text pass. Attaching it here -- after the renderer owns the pass,
-    // before the first frame records -- is the one seam that keeps submission
-    // one call without the text layer owning render-graph state. Until this
-    // runs, SubmitScreenText is deliberately a no-op.
-    if (ctx_.text_system && ctx_.renderer) {
-        ctx_.text_system->SetTextPass(ctx_.renderer->GetTextPass());
     }
-
-    // Engine-standard descriptor set layouts let the renderer build custom-pass
-    // pipelines and layouts.
-    ctx_.renderer->SetEngineDescriptorSetLayouts(std::array<vk::DescriptorSetLayout, 5>{
-        *ctx_.bindless_mgr->GetLayout(),
-        *ctx_.scene_renderer->GetSubmeshVertexEntriesLayout(),
-        *ctx_.scene_renderer->GetVertexBuffersLayout(),
-        *ctx_.scene_renderer->GetIndirectionLayout(),
-        ctx_.scene_renderer->GetSceneUniformLayout(),
-    });
 
     if (config_.enable_imgui) {
-        ctx_.imgui_backend = VulkanBackend::ImGui::CreateImGuiBackend();
+        auto s = DebugSection("engineinit.imgui_system");
+        {
+            auto s_backend = DebugSection("engineinit.imgui_backend");
+            ctx_.imgui_backend = VulkanBackend::ImGui::CreateImGuiBackend();
+        }
         ctx_.imgui_system = std::make_unique<ImGui::ImGuiSystem>(ctx_.imgui_backend);
 
         const auto surface_format = backend.GetSurfaceFormat();
@@ -437,13 +460,19 @@ bool GameEngine::InitRenderer(VulkanEngine::Application::ApplicationContext& ctx
     }
 
     // ── Flush pipeline cache (warm data persists across runs) ──
-    ctx_.shader_manager->FlushCache();
+    {
+        auto s = DebugSection("engineinit.shader_cache_flush");
+        ctx_.shader_manager->FlushCache();
+    }
 
     // ── Start shader file watching (watches all registered slang directories) ──
     // Directories registered after this (e.g. application shaders) are picked up
     // by RefreshShaderWatcher()/AddShaderDirectory().
-    ctx_.shader_watcher = std::make_unique<ShaderSystem::ShaderWatcher>(*ctx_.shader_manager);
-    ctx_.shader_watcher->Start();
+    {
+        auto s = DebugSection("engineinit.shader_watcher");
+        ctx_.shader_watcher = std::make_unique<ShaderSystem::ShaderWatcher>(*ctx_.shader_manager);
+        ctx_.shader_watcher->Start();
+    }
 
     return true;
 }

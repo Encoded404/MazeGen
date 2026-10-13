@@ -110,6 +110,11 @@ export namespace VulkanEngine::Application {
     };
 
     try {
+        // Startup timing starts before the logger comes up so the total covers
+        // logger and per-user storage initialization too — the counterpart of
+        // the per-phase and total timings the shutdown path logs in cleanup().
+        const VulkanShared::Timer startup{true};
+        double startup_prev = 0.0;
         VulkanEngine::Startup::InitializeLogger(config.log_level);
         LOGIFACE_LOG(info, config.app_name + " started");
 
@@ -182,6 +187,11 @@ export namespace VulkanEngine::Application {
             return fail(msg);
         }
         platform_initialized = true;
+        {
+            const double current = startup.ElapsedMs();
+            LOGIFACE_LOG(debug, "startup: platform " + std::to_string(current - startup_prev) + " ms");
+            startup_prev = current;
+        }
 
         SDL_Window* window = platform->GetNativeWindowHandle();
         if (window == nullptr) {
@@ -239,6 +249,11 @@ export namespace VulkanEngine::Application {
             return fail(bootstrap_message);
         }
         bootstrap_initialized = true;
+        {
+            const double current = startup.ElapsedMs();
+            LOGIFACE_LOG(debug, "startup: vulkan bootstrap " + std::to_string(current - startup_prev) + " ms");
+            startup_prev = current;
+        }
 
         VulkanEngine::Crash::Stage("runtime init");
         runtime = std::make_unique<VulkanBackend::Vulkan::FrameLoop>();
@@ -246,6 +261,11 @@ export namespace VulkanEngine::Application {
             return fail("Runtime shell initialization failed");
         }
         runtime_initialized = true;
+        {
+            const double current = startup.ElapsedMs();
+            LOGIFACE_LOG(debug, "startup: runtime " + std::to_string(current - startup_prev) + " ms");
+            startup_prev = current;
+        }
 
         context.platform = platform.get();
         context.runtime = runtime.get();
@@ -262,6 +282,11 @@ export namespace VulkanEngine::Application {
             return fail("Application setup failed");
         }
         setup_completed = true;
+        {
+            const double current = startup.ElapsedMs();
+            LOGIFACE_LOG(debug, "startup: app setup " + std::to_string(current - startup_prev) + " ms");
+            startup_prev = current;
+        }
 
         Runtime::FrameStepClock step_clock{};
         step_clock.Configure(config.fixed_timestep, config.max_fixed_steps_per_frame,
@@ -270,6 +295,11 @@ export namespace VulkanEngine::Application {
         auto previous_time = std::chrono::steady_clock::now();
         std::uint32_t rendered_frames = 0;
 
+        // Startup total at the frame-loop boundary. It includes the game's
+        // app setup; the engine-only figure is this minus the "startup:
+        // app setup" phase above. Runs after it, everything below is the
+        // steady state.
+        LOGIFACE_LOG(info, "startup: total " + std::to_string(startup.ElapsedMs()) + " ms");
         VulkanEngine::Crash::Stage("frame loop");
         while (!platform->ShouldQuit() && !runtime->ShouldShutdown()) {
             // Sampled once at the top of the iteration, ahead of every path that can
@@ -427,6 +457,12 @@ export namespace VulkanEngine::Application {
             }
 
             ++rendered_frames;
+            if (rendered_frames == 1) {
+                // Light game-side marker: time from process entry (well, logger
+                // init) to the first presented frame. Covers pipeline/shader
+                // first-use and the first acquire that the pre-loop total hides.
+                LOGIFACE_LOG(info, "startup: first frame " + std::to_string(startup.ElapsedMs()) + " ms");
+            }
             if (config.max_frames != 0 && rendered_frames >= config.max_frames) {
                 runtime->RequestShutdown();
             }

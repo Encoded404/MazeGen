@@ -68,6 +68,7 @@ bool EngineBootstrap::Initialize(EngineContext& ctx,
 
     ctx.bindless_mgr = std::make_unique<BindlessManager::BindlessManager>();
     {
+        auto s = DebugSection("engineinit.bindless_manager");
         // Subtract every other update-after-bind pool's descriptor count so the
         // bindless pool cannot exceed the global update-after-bind budget. The
         // engine's vertex-buffer, index-buffer and indirection sets are
@@ -86,32 +87,50 @@ bool EngineBootstrap::Initialize(EngineContext& ctx,
 
     GpuResources::HeapConfig heap_config{};
     heap_config.block_size = config.geometry_buffer_size_mb << 20;
-    if (!ctx.vertex_heap.Initialize(vk_backend, heap_config, "vertex")) return false;
-    if (!ctx.index_heap.Initialize(vk_backend, heap_config, "index")) return false;
-    if (!ctx.uv_heap.Initialize(vk_backend, heap_config, "uv")) return false;
-    if (!ctx.image_heap.Initialize(vk_backend, {}, "image")) return false;
-    if (!ctx.staging_pool.Initialize(vk_backend)) return false;
-    if (!ctx.sampler_cache.Initialize(vk_backend,
-                                      vk_backend.GetCapabilities().GetMaxSamplerAllocationCount())) {
-        return false;
+    {
+        auto s = DebugSection("engineinit.static_heaps");
+        if (!ctx.vertex_heap.Initialize(vk_backend, heap_config, "vertex")) return false;
+        if (!ctx.index_heap.Initialize(vk_backend, heap_config, "index")) return false;
+        if (!ctx.uv_heap.Initialize(vk_backend, heap_config, "uv")) return false;
+    }
+    {
+        auto s = DebugSection("engineinit.image_heap");
+        if (!ctx.image_heap.Initialize(vk_backend, {}, "image")) return false;
+    }
+    {
+        auto s = DebugSection("engineinit.staging_manager");
+        if (!ctx.staging_pool.Initialize(vk_backend)) return false;
+    }
+    {
+        auto s = DebugSection("engineinit.sampler_cache");
+        if (!ctx.sampler_cache.Initialize(vk_backend,
+                                          vk_backend.GetCapabilities().GetMaxSamplerAllocationCount())) {
+            return false;
+        }
     }
 
     // Async texture uploader: needs the image heap, staging pool, bindless
     // manager, sampler cache and the device capability snapshot, so it is
     // created last.
     ctx.texture_uploader = std::make_unique<Textures::TextureUploader>();
-    if (!ctx.texture_uploader->Initialize(vk_backend, ctx.image_heap, ctx.staging_pool,
-                                          *ctx.bindless_mgr, vk_backend.GetCapabilities(),
-                                          &ctx.sampler_cache)) {
-        return false;
+    {
+        auto s = DebugSection("engineinit.texture_uploader");
+        if (!ctx.texture_uploader->Initialize(vk_backend, ctx.image_heap, ctx.staging_pool,
+                                              *ctx.bindless_mgr, vk_backend.GetCapabilities(),
+                                              &ctx.sampler_cache)) {
+            return false;
+        }
     }
 
     // Whole-texture residency: active only with VK_EXT_memory_budget or an
     // explicit budget override, otherwise inert so the engine is unchanged.
     ctx.texture_residency = std::make_unique<Textures::TextureResidency>();
-    ctx.texture_residency->Initialize(*ctx.bindless_mgr, ctx.material_mgr,
-                                      vk_backend.GetCapabilities(),
-                                      config.texture_memory_budget_bytes);
+    {
+        auto s = DebugSection("engineinit.texture_residency");
+        ctx.texture_residency->Initialize(*ctx.bindless_mgr, ctx.material_mgr,
+                                          vk_backend.GetCapabilities(),
+                                          config.texture_memory_budget_bytes);
+    }
     ctx.texture_uploader->SetOnReserve(
         [&ctx](BindlessManager::TextureHandle handle, const ResourceId& id) {
             if (ctx.texture_residency) {
@@ -130,11 +149,17 @@ bool EngineBootstrap::Initialize(EngineContext& ctx,
     // registers each source file it uploads. Without hot reload the members stay
     // null and the per-frame pump is skipped.
     ctx.texture_watcher = std::make_unique<TextureSystem::TextureWatcher>();
-    ctx.texture_reloader = std::make_unique<Textures::TextureReloader>();
-    ctx.texture_reloader->Initialize(*ctx.texture_watcher, ctx.resource_manager,
-                                     *ctx.bindless_mgr, *ctx.texture_uploader,
-                                     *ctx.texture_residency, ctx.material_mgr);
-    ctx.texture_watcher->Start();
+    {
+        auto s = DebugSection("engineinit.texture_reloader");
+        ctx.texture_reloader = std::make_unique<Textures::TextureReloader>();
+        ctx.texture_reloader->Initialize(*ctx.texture_watcher, ctx.resource_manager,
+                                         *ctx.bindless_mgr, *ctx.texture_uploader,
+                                         *ctx.texture_residency, ctx.material_mgr);
+    }
+    {
+        auto s = DebugSection("engineinit.texture_watcher");
+        ctx.texture_watcher->Start();
+    }
 #endif
 
     // Text pipeline. The registry, shaping, layout, rasterization and the pure
@@ -144,21 +169,31 @@ bool EngineBootstrap::Initialize(EngineContext& ctx,
     // still boots -- it simply never draws text.
     ctx.text_system = std::make_unique<Text::TextSystem>();
     ctx.text_system->SetResourceManager(ctx.resource_manager);
-    if (!ctx.text_system->InitializeGpu(vk_backend, ctx.image_heap, ctx.staging_pool,
-                                        *ctx.bindless_mgr, &ctx.sampler_cache)) {
-        LOGIFACE_LOG(warn, "EngineBootstrap: glyph atlas GPU layer unavailable; text stays CPU-only");
+    {
+        auto s = DebugSection("engineinit.text_system");
+        if (!ctx.text_system->InitializeGpu(vk_backend, ctx.image_heap, ctx.staging_pool,
+                                            *ctx.bindless_mgr, &ctx.sampler_cache)) {
+            LOGIFACE_LOG(warn, "EngineBootstrap: glyph atlas GPU layer unavailable; text stays CPU-only");
+        }
     }
 
 #ifdef VKENGINE_HOT_RELOAD
     // Font hot reload mirrors the texture pair: the watcher starts empty and
     // GameEngine registers each font file it loads through the text system.
     ctx.font_watcher = std::make_unique<Text::FontWatcher>();
-    ctx.font_reloader = std::make_unique<Text::FontReloader>();
-    ctx.font_reloader->Initialize(*ctx.font_watcher, *ctx.text_system);
-    ctx.font_watcher->Start();
+    {
+        auto s = DebugSection("engineinit.font_reloader");
+        ctx.font_reloader = std::make_unique<Text::FontReloader>();
+        ctx.font_reloader->Initialize(*ctx.font_watcher, *ctx.text_system);
+    }
+    {
+        auto s = DebugSection("engineinit.font_watcher");
+        ctx.font_watcher->Start();
+    }
 #endif
 
     {
+        auto s = DebugSection("engineinit.dynamic_heaps");
         GpuResources::HeapConfig dynamic_heap_config{};
         dynamic_heap_config.block_size = 32ULL << 20;
         dynamic_heap_config.memory_flags =
@@ -177,34 +212,47 @@ bool EngineBootstrap::Initialize(EngineContext& ctx,
     }
 
     ctx.mesh_manager = std::make_unique<MeshManager>();
-    if (!ctx.mesh_manager->Initialize(vk_backend, &ctx.vertex_heap, &ctx.index_heap,
-                                       &ctx.uv_heap,
-                                       &ctx.staging_pool,
-                                       ctx.dynamic_vertex_heaps.data(),
-                                       ctx.dynamic_index_heaps.data(),
-                                       static_cast<std::uint32_t>(ctx.dynamic_vertex_heaps.size()))) {
-        return false;
+    {
+        auto s = DebugSection("engineinit.mesh_manager");
+        if (!ctx.mesh_manager->Initialize(vk_backend, &ctx.vertex_heap, &ctx.index_heap,
+                                          &ctx.uv_heap,
+                                          &ctx.staging_pool,
+                                          ctx.dynamic_vertex_heaps.data(),
+                                          ctx.dynamic_index_heaps.data(),
+                                          static_cast<std::uint32_t>(ctx.dynamic_vertex_heaps.size()))) {
+            return false;
+        }
     }
 
-    ctx.shader_manager = std::make_unique<ShaderSystem::ShaderManager>(
-        vk_backend.GetDevice(), vk_backend.GetCapabilities(),
-        config.shader_cache_dir);
-    ctx.pipeline_factory = std::make_unique<ShaderSystem::PipelineFactory>(
-        vk_backend.GetDevice(), vk_backend.GetCapabilities(),
-        ctx.shader_manager->GetPipelineCacheRAII(), config.gpl_policy, config.gpl_structure);
+    {
+        auto s = DebugSection("engineinit.shader_manager");
+        ctx.shader_manager = std::make_unique<ShaderSystem::ShaderManager>(
+            vk_backend.GetDevice(), vk_backend.GetCapabilities(),
+            config.shader_cache_dir);
+    }
+    {
+        auto s = DebugSection("engineinit.pipeline_factory");
+        ctx.pipeline_factory = std::make_unique<ShaderSystem::PipelineFactory>(
+            vk_backend.GetDevice(), vk_backend.GetCapabilities(),
+            ctx.shader_manager->GetPipelineCacheRAII(), config.gpl_policy, config.gpl_structure);
+    }
 
-    if (!config.shader_data_dir.empty()) {
-        ctx.shader_ids.RegisterAll(*ctx.shader_manager, config.shader_data_dir);
+    {
+        auto s = DebugSection("engineinit.shader_registration");
+        if (!config.shader_data_dir.empty()) {
+            ctx.shader_ids.RegisterAll(*ctx.shader_manager, config.shader_data_dir);
+        }
     }
 
 #ifdef VKENGINE_PHYSICAL_CAMERA
     if (config.enable_physical_camera) {
+        auto s = DebugSection("engineinit.physical_camera");
         ctx.physical_camera = std::make_unique<PhysicalCamera::PhysicalCameraSystem>();
         if (!ctx.physical_camera->Initialize(vk_backend, *ctx.bindless_mgr, ctx.image_heap,
-                                              ctx.sampler_cache,
-                                              *ctx.shader_manager, *ctx.pipeline_factory,
-                                              ctx.shader_ids.physical_camera_composite_vert,
-                                              ctx.shader_ids.physical_camera_composite_frag)) {
+                                             ctx.sampler_cache,
+                                             *ctx.shader_manager, *ctx.pipeline_factory,
+                                             ctx.shader_ids.physical_camera_composite_vert,
+                                             ctx.shader_ids.physical_camera_composite_frag)) {
             ctx.physical_camera.reset();
         }
     }
