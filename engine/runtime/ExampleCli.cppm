@@ -61,34 +61,6 @@ public:
     [[nodiscard]] VulkanEngine::Application::ApplicationConfig MakeConfig() const;
 
 private:
-    // CLI11 2.5.0's default Formatter runs the footer through
-    // detail::streamOutAsParagraph, which strips leading whitespace and collapses
-    // multi-space runs — destroying the aligned overrides table. Emit the footer
-    // verbatim; everything else matches the default Formatter.
-    class RawFooterFormatter final : public CLI::Formatter {
-    public:
-        std::string make_help(const CLI::App* app, std::string name,
-                              CLI::AppFormatMode mode) const override {
-            if (mode == CLI::AppFormatMode::Sub) {
-                return make_expanded(app, mode);
-            }
-            std::stringstream out;
-            if (app->get_name().empty() && app->get_parent() != nullptr) {
-                if (app->get_group() != "SUBCOMMANDS") {
-                    out << app->get_group() << ':';
-                }
-            }
-            CLI::detail::streamOutAsParagraph(
-                out, make_description(app), description_paragraph_width_, "");
-            out << make_usage(app, name);
-            out << make_positionals(app);
-            out << make_groups(app, mode);
-            out << make_subcommands(app, mode);
-            out << make_footer(app);  // verbatim — no paragraph re-wrap
-            return out.str();
-        }
-    };
-
     CLI::App app_{};
     std::string app_name_{};
     std::string org_id_{};

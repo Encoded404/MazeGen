@@ -21,7 +21,13 @@ Cli::Cli(std::string_view app_name, std::string_view org_id, std::string_view ap
     , app_name_(app_name)
     , org_id_(org_id)
     , app_id_(app_id) {
-    app_.formatter(std::make_shared<RawFooterFormatter>());
+    // CLI11 paragraph-wraps the footer by default, which strips leading
+    // whitespace and collapses multi-space runs — destroying the aligned
+    // overrides table. Turn footer formatting off; everything else matches
+    // the default Formatter.
+    auto formatter = std::make_shared<CLI::Formatter>();
+    formatter->enable_footer_formatting(false);
+    app_.formatter(formatter);
 
     app_.add_option("-l,--log-level", log_level_,
                     "Console output log level (trace, debug, info, warn, error, critical)")
