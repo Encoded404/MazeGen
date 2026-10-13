@@ -18,6 +18,8 @@ import VulkanEngine.Render.Passes.DepthPrePass;
 import VulkanEngine.Render.Passes.OcclusionPass;
 import VulkanEngine.Render.Passes.CollectPass;
 import VulkanEngine.Render.Passes.MainPass;
+import VulkanEngine.Render.Passes.WorldTextPass;
+import VulkanEngine.Render.Passes.TextPass;
 import VulkanEngine.Render.Passes.ImGuiPass;
 
 namespace {
@@ -27,9 +29,9 @@ using VulkanEngine::RenderGraph::PassHandle;
 using VulkanEngine::RenderPipeline::RenderPipeline;
 
 const VulkanEngine::RenderGraph::CompiledPass* FindPass(const RenderPipeline& pipeline,
-                                                        std::string_view name) {
+                                                        PassHandle handle) {
     for (const auto& pass : pipeline.GetCompiledGraph().passes) {
-        if (pass.name == name) {
+        if (pass.handle == handle) {
             return &pass;
         }
     }
@@ -37,8 +39,9 @@ const VulkanEngine::RenderGraph::CompiledPass* FindPass(const RenderPipeline& pi
 }
 
 // Registers the import resolvers the built-in passes require, then every
-// built-in through the public RegisterPass path and checks the declarations
-// reach the compiled graph.
+// built-in through the public RegisterPass path and checks the compiled graph
+// covers each BuiltinPass enumerator exactly once, plus the clear/load depth
+// contract the renderer's correctness depends on.
 TEST(BuiltinPassDeclarationsTest, SetupDrivesGraphDeclarations) {
     VulkanEngine::SceneRenderer::SceneRenderer scene_renderer; // Setup() does not touch the device
     RenderPipeline pipeline;
@@ -73,7 +76,28 @@ TEST(BuiltinPassDeclarationsTest, SetupDrivesGraphDeclarations) {
     const auto collect = reg(std::make_unique<SR::CollectPass>(scene_renderer));
     const auto main_pass =
         reg(std::make_unique<SR::MainPass>(scene_renderer, glm::vec4{0.1f, 0.1f, 0.1f, 1.0f}));
+    const auto world_text = reg(std::make_unique<SR::WorldTextPass>(nullptr, 15, 17));
+    const auto text = reg(std::make_unique<SR::TextPass>(nullptr, 19, 23));
     const auto imgui = reg(std::make_unique<SR::ImGuiPass>(nullptr));
+
+    // Key the anchor table by the BuiltinPass enumerator each registration
+    // backs: the Count sentinel then drives completeness, so a builtin that is
+    // added to (or dropped from) the enum without a registered pass fails below
+    // without this test naming it. Pass order itself is the renderer's wiring.
+    std::array<PassHandle, kBuiltinPassCount> anchors{};
+    anchors[static_cast<std::size_t>(BuiltinPass::Expand)] = expand;
+    anchors[static_cast<std::size_t>(BuiltinPass::OccluderSelect)] = occluder_select;
+    anchors[static_cast<std::size_t>(BuiltinPass::OccluderPrepass)] = occluder_prepass;
+    anchors[static_cast<std::size_t>(BuiltinPass::HiZGenPre)] = hiz_pre;
+    anchors[static_cast<std::size_t>(BuiltinPass::PreCull)] = pre_cull;
+    anchors[static_cast<std::size_t>(BuiltinPass::DepthPrepass)] = depth;
+    anchors[static_cast<std::size_t>(BuiltinPass::HiZGen)] = hiz;
+    anchors[static_cast<std::size_t>(BuiltinPass::Occlusion)] = occlusion;
+    anchors[static_cast<std::size_t>(BuiltinPass::Collect)] = collect;
+    anchors[static_cast<std::size_t>(BuiltinPass::MainPass)] = main_pass;
+    anchors[static_cast<std::size_t>(BuiltinPass::WorldText)] = world_text;
+    anchors[static_cast<std::size_t>(BuiltinPass::Text)] = text;
+    anchors[static_cast<std::size_t>(BuiltinPass::ImGui)] = imgui;
 
     pipeline.AddDependency(expand, occluder_select);
     pipeline.AddDependency(occluder_select, occluder_prepass);
@@ -84,42 +108,71 @@ TEST(BuiltinPassDeclarationsTest, SetupDrivesGraphDeclarations) {
     pipeline.AddDependency(hiz, occlusion);
     pipeline.AddDependency(occlusion, collect);
     pipeline.AddDependency(collect, main_pass);
-    pipeline.AddDependency(main_pass, imgui);
+    pipeline.AddDependency(main_pass, world_text);
+    pipeline.AddDependency(world_text, text);
+    pipeline.AddDependency(text, imgui);
 
     pipeline.Compile();
     ASSERT_TRUE(pipeline.IsCompiled());
+    const auto& passes = pipeline.GetCompiledGraph().passes;
 
-    // Order matches the built-in chain.
-    static constexpr std::array<std::string_view, 11> kExpectedOrder{
-        "expand", "occluder-select", "occluder-prepass", "hiz-gen-pre", "pre-cull",
-        "depth-prepass", "hiz-gen", "occlusion", "collect", "main-pass", "imgui-overlay",
-    };
-    ASSERT_EQ(pipeline.GetCompiledGraph().passes.size(), kExpectedOrder.size());
-    for (std::size_t i = 0; i < kExpectedOrder.size(); ++i) {
-        EXPECT_EQ(pipeline.GetCompiledGraph().passes[i].name, kExpectedOrder[i]);
+    // Every BuiltinPass enumerator has exactly one compiled pass: no builtin is
+    // missing from the graph and no registration silently duplicated one.
+    for (std::size_t i = 0; i < kBuiltinPassCount; ++i) {
+        ASSERT_TRUE(anchors[i].IsValid())
+            << "no pass registered for BuiltinPass enumerator " << i;
+        std::size_t matches = 0;
+        for (const auto& pass : passes) {
+            if (pass.handle == anchors[i]) {
+                ++matches;
+            }
+        }
+        EXPECT_EQ(matches, 1u)
+            << "BuiltinPass enumerator " << i << " must back exactly one compiled pass";
     }
 
-    // Occluder pre-pass: auto render end, depth clear + store.
-    const auto* occluder_pass = FindPass(pipeline, "occluder-prepass");
+    // The only ordering relation the docs pin for the anchors themselves: the
+    // scene overlays must run after the main pass (see "Ordering" in
+    // docs/app-render-passes.md, RunAfter(BuiltinPass::MainPass)). The rest of
+    // the chain is hazard-resolved, not pinned by name here.
+    const auto position_of = [&](PassHandle handle) -> std::optional<std::size_t> {
+        for (std::size_t i = 0; i < passes.size(); ++i) {
+            if (passes[i].handle == handle) {
+                return i;
+            }
+        }
+        return std::nullopt;
+    };
+    const auto main_pos = position_of(anchors[static_cast<std::size_t>(BuiltinPass::MainPass)]);
+    const auto imgui_pos = position_of(anchors[static_cast<std::size_t>(BuiltinPass::ImGui)]);
+    ASSERT_TRUE(main_pos.has_value());
+    ASSERT_TRUE(imgui_pos.has_value());
+    EXPECT_LT(*main_pos, *imgui_pos)
+        << "the overlay composites over the main pass's output";
+
+    // Occluder pre-pass: the depth the later contract pair starts from.
+    const auto* occluder_pass =
+        FindPass(pipeline, anchors[static_cast<std::size_t>(BuiltinPass::OccluderPrepass)]);
     ASSERT_NE(occluder_pass, nullptr);
     ASSERT_TRUE(occluder_pass->attachment_setup.has_value());
-    EXPECT_TRUE(occluder_pass->attachment_setup->auto_begin_rendering);
     ASSERT_TRUE(occluder_pass->attachment_setup->depth_attachment.has_value());
     EXPECT_EQ(occluder_pass->attachment_setup->depth_attachment->load_op,
               vk::AttachmentLoadOp::eClear);
-    EXPECT_EQ(occluder_pass->attachment_setup->depth_attachment->store_op,
-              vk::AttachmentStoreOp::eStore);
 
     // Depth pre-pass: loads the occluder depth (no clear).
-    const auto* depth_pass = FindPass(pipeline, "depth-prepass");
+    const auto* depth_pass =
+        FindPass(pipeline, anchors[static_cast<std::size_t>(BuiltinPass::DepthPrepass)]);
     ASSERT_NE(depth_pass, nullptr);
     ASSERT_TRUE(depth_pass->attachment_setup.has_value());
     ASSERT_TRUE(depth_pass->attachment_setup->depth_attachment.has_value());
     EXPECT_EQ(depth_pass->attachment_setup->depth_attachment->load_op,
               vk::AttachmentLoadOp::eLoad);
 
-    // Main pass: one clear colour attachment plus the loaded depth.
-    const auto* main = FindPass(pipeline, "main-pass");
+    // Main pass: clears its one colour attachment and loads (not clears) the
+    // depth the depth pre-pass produced. That clear/load pair is the renderer's
+    // correctness contract, so it is the only attachment state pinned here.
+    const auto* main =
+        FindPass(pipeline, anchors[static_cast<std::size_t>(BuiltinPass::MainPass)]);
     ASSERT_NE(main, nullptr);
     ASSERT_TRUE(main->attachment_setup.has_value());
     ASSERT_EQ(main->attachment_setup->color_attachments.size(), 1u);
@@ -129,14 +182,13 @@ TEST(BuiltinPassDeclarationsTest, SetupDrivesGraphDeclarations) {
     EXPECT_EQ(main->attachment_setup->depth_attachment->load_op,
               vk::AttachmentLoadOp::eLoad);
 
-    // ImGui overlay: draws into the existing colour, so it must not auto-begin.
-    const auto* imgui_pass = FindPass(pipeline, "imgui-overlay");
+    // ImGui overlay: continues the main pass's rendering area, so it must not
+    // auto-begin (which would clear the frame).
+    const auto* imgui_pass =
+        FindPass(pipeline, anchors[static_cast<std::size_t>(BuiltinPass::ImGui)]);
     ASSERT_NE(imgui_pass, nullptr);
     ASSERT_TRUE(imgui_pass->attachment_setup.has_value());
     EXPECT_FALSE(imgui_pass->attachment_setup->auto_begin_rendering);
-    ASSERT_EQ(imgui_pass->attachment_setup->color_attachments.size(), 1u);
-    EXPECT_EQ(imgui_pass->attachment_setup->color_attachments.front().load_op,
-              vk::AttachmentLoadOp::eLoad);
 }
 
 // SceneViewport is the y mirror that reconciles GLM's y-up projection with

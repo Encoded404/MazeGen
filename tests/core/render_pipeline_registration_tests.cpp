@@ -219,18 +219,19 @@ TEST(RenderPipelineRegistrationTest, ShaderReadOnlyInitialAndFinalLayoutsSurvive
 
     const auto& graph = pipeline.GetCompiledGraph();
     const std::uint32_t index = raw_pass->target_.index;
-    ASSERT_LT(index, graph.has_initial_state.size());
-    ASSERT_TRUE(graph.has_initial_state[index]);
-    EXPECT_EQ(graph.initial_states[index].layout,
-              VulkanEngine::RenderGraph::ImageLayoutIntent::ShaderReadOnly);
 
-    ASSERT_EQ(graph.passes.size(), 1u);
-    const auto& post = graph.passes.front().post_pass_transitions;
-    ASSERT_EQ(post.size(), 1u);
-    EXPECT_EQ(post.front().target_state.layout,
-              VulkanEngine::RenderGraph::ImageLayoutIntent::ShaderReadOnly);
-    EXPECT_EQ(VulkanEngine::RenderGraph::IntentToImageLayout(post.front().target_state.layout),
-              vk::ImageLayout::eShaderReadOnlyOptimal);
+    // The requested initial layout must survive compile as the exact
+    // eShaderReadOnlyOptimal: a degrade to Undefined would insert a
+    // content-discarding acquire barrier.
+    const auto initial = graph.InitialImageLayoutFor(index);
+    ASSERT_TRUE(initial.has_value());
+    EXPECT_EQ(*initial, vk::ImageLayout::eShaderReadOnlyOptimal);
+
+    // And the compiled final transition must post the same non-Undefined
+    // layout the pass requested (the original ShaderReadOnly regression).
+    const auto final_layout = graph.FinalImageLayoutFor(index);
+    ASSERT_TRUE(final_layout.has_value());
+    EXPECT_EQ(*final_layout, vk::ImageLayout::eShaderReadOnlyOptimal);
 }
 
 }  // namespace

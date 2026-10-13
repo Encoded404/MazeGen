@@ -72,11 +72,19 @@ TEST(DrawGroupTest, InterningIsDenseAndIdempotent) {
     TechniqueManager mgr;
     const auto a = mgr.Register(std::make_unique<TestTechnique>());
     const auto b = mgr.Register(std::make_unique<TestTechnique>());
+    // Distinct techniques yield pairwise-distinct ids inside the dense range;
+    // which id each technique lands on is not part of the contract.
+    EXPECT_NE(a.value, b.value);
+    EXPECT_LT(a.value, TechniquePacking::MAX_DRAW_GROUPS);
+    EXPECT_LT(b.value, TechniquePacking::MAX_DRAW_GROUPS);
     EXPECT_EQ(mgr.GetDrawGroupCount(), 2u);
 
-    // Distinct render state interns a new dense group.
+    // Interning a new triple claims some fresh dense group: the concrete id is
+    // unspecified, only that it is in range, unclaimed, and owned by `a`.
     const std::uint16_t g = mgr.InternDrawGroup(a.value, 0, 0x40u);
-    EXPECT_EQ(g, 2u);
+    EXPECT_LT(g, TechniquePacking::MAX_DRAW_GROUPS);
+    EXPECT_NE(g, a.value);
+    EXPECT_NE(g, b.value);
     EXPECT_EQ(mgr.GetDrawGroupCount(), 3u);
     EXPECT_EQ(mgr.GetDrawGroupTechnique(g), a.value);
 
@@ -87,6 +95,7 @@ TEST(DrawGroupTest, InterningIsDenseAndIdempotent) {
     // A different technique's identical state is a different group.
     const std::uint16_t gb = mgr.InternDrawGroup(b.value, 0, 0x40u);
     EXPECT_NE(gb, g);
+    EXPECT_LT(gb, TechniquePacking::MAX_DRAW_GROUPS);
     EXPECT_EQ(mgr.GetDrawGroupTechnique(gb), b.value);
 }
 

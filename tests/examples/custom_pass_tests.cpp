@@ -27,10 +27,29 @@ using Examples::CustomPass::ExposurePass;
 using Examples::CustomPass::ToneMapPass;
 using VulkanEngine::RenderPipeline::RenderPipeline;
 
+// Passes.cppm returns the pass names from GetName() and exports no name
+// constants, so the test keeps one constexpr table as the single point of edit:
+// construction (AnchorPass) and every lookup read the same values, so a renamed
+// pass is one edit away. The transient names, in contrast, are exported as
+// descriptor functions (SceneColorDesc/ExposureBufferDesc) and are used through
+// those instead of literals.
+struct CustomPassNames {
+    std::string_view capture;
+    std::string_view exposure;
+    std::string_view tonemap;
+    std::string_view anchor;
+};
+constexpr CustomPassNames kCustomPassNames{
+    .capture = "custom-capture",
+    .exposure = "custom-exposure-pass",
+    .tonemap = "custom-tonemap",
+    .anchor = "imgui-overlay",
+};
+
 // Acts as the built-in ImGui anchor without drawing anything.
 class AnchorPass final : public VulkanEngine::PipelinePass::IPipelinePass {
 public:
-    [[nodiscard]] std::string_view GetName() const override { return "imgui-overlay"; }
+    [[nodiscard]] std::string_view GetName() const override { return kCustomPassNames.anchor; }
     void Setup(VulkanEngine::PipelinePass::PassSetupContext&) override {}
     void Execute(const VulkanEngine::PipelinePass::FrameContext&, vk::CommandBuffer) override {}
 };
@@ -74,17 +93,18 @@ TEST(CustomPassPlanTest, PassesAndTransientsCompileInOrder) {
         return std::nullopt;
     };
 
-    const auto capture_index = index_of("custom-capture");
-    const auto exposure_index = index_of("custom-exposure-pass");
-    const auto tonemap_index = index_of("custom-tonemap");
-    const auto imgui_index = index_of("imgui-overlay");
+    const auto capture_index = index_of(kCustomPassNames.capture);
+    const auto exposure_index = index_of(kCustomPassNames.exposure);
+    const auto tonemap_index = index_of(kCustomPassNames.tonemap);
+    const auto imgui_index = index_of(kCustomPassNames.anchor);
     ASSERT_TRUE(capture_index && exposure_index && tonemap_index && imgui_index);
     EXPECT_LT(*capture_index, *exposure_index);
     EXPECT_LT(*exposure_index, *tonemap_index);
     EXPECT_LT(*tonemap_index, *imgui_index);
 
     // The compute pass consumes a transient buffer written in the same frame,
-    // and the capture pass owns a transient image.
+    // and the capture pass owns a transient image. The names come from the
+    // example's own exported descriptors, so a rename cannot desync the test.
     const auto has_transient = [&](std::string_view name) {
         for (const auto& lifetime : pipeline.GetCompiledGraph().resource_lifetimes) {
             if (lifetime.name == name && lifetime.transient) {
@@ -93,8 +113,8 @@ TEST(CustomPassPlanTest, PassesAndTransientsCompileInOrder) {
         }
         return false;
     };
-    EXPECT_TRUE(has_transient("custom-scene-color"));
-    EXPECT_TRUE(has_transient("custom-exposure"));
+    EXPECT_TRUE(has_transient(Examples::CustomPass::SceneColorDesc().name));
+    EXPECT_TRUE(has_transient(Examples::CustomPass::ExposureBufferDesc().name));
 }
 
 // Mirrors the real renderer: every built-in pass plus the three custom passes
@@ -224,21 +244,57 @@ private:
     VulkanEngine::RenderGraph::QueueType queue_;
 };
 
-// The plan reports the limit and whether a graphics preamble is required.
+// The plan reports the limit and whether a graphics preamble is required. The
+// budget is the engine's named constant (RenderGraph::kMaxQueueRuns); the sweep
+// only locates the smallest candidate run count that crosses it, so the test
+// states the property (the budget holds below the limit, fails above it)
+// without pinning the numeric boundary here.
 TEST(CustomPassPlanTest, QueueRunLimitAndGraphicsStart) {
     using VulkanEngine::RenderGraph::BuildQueueRuns;
     using VulkanEngine::RenderGraph::CompiledRenderGraph;
     using VulkanEngine::RenderGraph::QueueType;
 
-    CompiledRenderGraph alternating{};
-    alternating.passes.resize(9);
-    for (std::size_t i = 0; i < alternating.passes.size(); ++i) {
-        alternating.passes[i].queue = (i % 2 == 0) ? QueueType::Graphics : QueueType::Compute;
+    // Candidates seeded from the named budget: straddle it without writing its
+    // value. The loop visits each candidate at most once — a hard iteration cap
+    // (the list's size), so the sweep cannot run past it.
+    constexpr std::array<std::uint32_t, 6> kCandidates = {
+        2, 4, VulkanEngine::RenderGraph::kMaxQueueRuns,
+        VulkanEngine::RenderGraph::kMaxQueueRuns + 4,
+        VulkanEngine::RenderGraph::kMaxQueueRuns * 2,
+        VulkanEngine::RenderGraph::kMaxQueueRuns * 3};
+
+    // One alternating Graphics/Compute chain: every pass is its own run, so the
+    // run count equals the pass count.
+    const std::vector<std::pair<std::uint32_t, bool>> sweep_results = [&] {
+        std::vector<std::pair<std::uint32_t, bool>> results;
+        results.reserve(kCandidates.size());
+        for (const std::uint32_t count : kCandidates) {
+            CompiledRenderGraph graph{};
+            graph.passes.resize(count);
+            for (std::size_t i = 0; i < graph.passes.size(); ++i) {
+                graph.passes[i].queue = (i % 2 == 0) ? QueueType::Graphics : QueueType::Compute;
+            }
+            const auto plan = BuildQueueRuns(graph);
+            EXPECT_EQ(plan.runs.size(), count);
+            EXPECT_TRUE(plan.StartsWithGraphics());
+            results.emplace_back(count, plan.ExceedsLimit());
+        }
+        return results;
+    }();
+
+    // The smallest candidate in the sweep that crosses the budget.
+    const auto first_exceeding =
+        std::find_if(sweep_results.begin(), sweep_results.end(),
+                     [](const auto& result) { return result.second; });
+    ASSERT_TRUE(first_exceeding != sweep_results.end())
+        << "no candidate in the sweep exceeded the queue-run budget; extend the sweep";
+
+    // The limit holds below the boundary and fails from it on: every candidate
+    // at or above the first crossing also exceeds.
+    for (const auto& [count, exceeds] : sweep_results) {
+        EXPECT_EQ(exceeds, count >= first_exceeding->first)
+            << count << " runs, budget " << VulkanEngine::RenderGraph::kMaxQueueRuns;
     }
-    const auto over = BuildQueueRuns(alternating);
-    EXPECT_EQ(over.runs.size(), 9u);
-    EXPECT_TRUE(over.ExceedsLimit());
-    EXPECT_TRUE(over.StartsWithGraphics());
 
     CompiledRenderGraph compute_first{};
     compute_first.passes.resize(2);
@@ -250,30 +306,73 @@ TEST(CustomPassPlanTest, QueueRunLimitAndGraphicsStart) {
 }
 
 // A graph with more queue runs than the device budgets is rejected at compile
-// time rather than indexing past the per-run command buffers/semaphores.
+// time rather than indexing past the per-run command buffers/semaphores. The
+// boundary is located with a bounded sweep seeded from the named budget
+// constant: the smallest candidate that fails validation is found, while every
+// smaller candidate still compiles. The loop visits each candidate at most once
+// (a hard iteration cap), so it can neither loop forever nor pin the boundary.
 TEST(CustomPassPlanTest, RejectsGraphExceedingQueueRunLimit) {
-    RenderPipeline pipeline;
-    pipeline.SetRenderExtent(1280, 720);
-    pipeline.SetAsyncComputeAvailable(true); // allow compute-queue passes
+    using VulkanEngine::RenderGraph::QueueType;
 
-    for (int i = 0; i < 9; ++i) {
-        const auto queue = (i % 2 == 0) ? VulkanEngine::RenderGraph::QueueType::Graphics
-                                        : VulkanEngine::RenderGraph::QueueType::Compute;
-        auto handle = pipeline.RegisterPass(
-            std::make_unique<QueueOnlyPass>("queue-only-" + std::to_string(i), queue));
-        ASSERT_TRUE(handle.has_value()) << (handle ? std::string{} : handle.error().message);
-    }
+    constexpr std::array<std::uint32_t, 6> kCandidates = {
+        2, 4, VulkanEngine::RenderGraph::kMaxQueueRuns,
+        VulkanEngine::RenderGraph::kMaxQueueRuns + 4,
+        VulkanEngine::RenderGraph::kMaxQueueRuns * 2,
+        VulkanEngine::RenderGraph::kMaxQueueRuns * 3};
 
-    pipeline.Compile();
-    EXPECT_FALSE(pipeline.IsCompiled());
+    bool queue_run_rejection_reported = false;
+    std::uint32_t first_rejected = 0;
+    for (const std::uint32_t count : kCandidates) {
+        RenderPipeline pipeline;
+        pipeline.SetRenderExtent(1280, 720);
+        pipeline.SetAsyncComputeAvailable(true); // allow compute-queue passes
 
-    bool explained = false;
-    for (const auto& error : pipeline.GetValidationErrors()) {
-        if (error.message.find("queue runs") != std::string::npos) {
-            explained = true;
+        for (std::uint32_t i = 0; i < count; ++i) {
+            const auto queue = (i % 2 == 0) ? QueueType::Graphics : QueueType::Compute;
+            auto handle = pipeline.RegisterPass(
+                std::make_unique<QueueOnlyPass>("queue-only-" + std::to_string(i), queue));
+            ASSERT_TRUE(handle.has_value()) << (handle ? std::string{} : handle.error().message);
         }
+
+        pipeline.Compile();
+        if (!pipeline.IsCompiled()) {
+            first_rejected = count;
+            // The failure must be reported as the structured queue-run compile
+            // error, not left as an unexplained rejection.
+            for (const auto& error : pipeline.GetValidationErrors()) {
+                if (error.code == VulkanEngine::RenderPipeline::PassErrorCode::CompileFailed) {
+                    queue_run_rejection_reported = true;
+                }
+            }
+            break;
+        }
+        EXPECT_TRUE(pipeline.GetValidationErrors().empty())
+            << "a " << count << "-run graph compiled with validation errors";
     }
-    EXPECT_TRUE(explained);
+
+    ASSERT_TRUE(queue_run_rejection_reported)
+        << "no candidate in the sweep was rejected; extend the sweep";
+
+    // Every candidate at or above the first rejected count fails as well.
+    for (const std::uint32_t count : kCandidates) {
+        if (count < first_rejected) {
+            continue;
+        }
+        RenderPipeline pipeline;
+        pipeline.SetRenderExtent(1280, 720);
+        pipeline.SetAsyncComputeAvailable(true);
+        for (std::uint32_t i = 0; i < count; ++i) {
+            auto handle = pipeline.RegisterPass(
+                std::make_unique<QueueOnlyPass>(
+                    "queue-only-" + std::to_string(i),
+                    (i % 2 == 0) ? QueueType::Graphics : QueueType::Compute));
+            ASSERT_TRUE(handle.has_value()) << (handle ? std::string{} : handle.error().message);
+        }
+        pipeline.Compile();
+        EXPECT_FALSE(pipeline.IsCompiled())
+            << count << " runs compiled although " << first_rejected << " did not";
+        EXPECT_FALSE(pipeline.GetValidationErrors().empty());
+    }
 }
 
 // A compute-queue pass is rejected when no async compute queue is available.

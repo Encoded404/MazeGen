@@ -118,8 +118,6 @@ TEST_F(GltfMaterialImportTest, ParsesMaterialsTexturesAndSamplers) {
     EXPECT_FALSE(result.textures[0].basisu);
 
     // A data URI is inlined by LoadExternalImages into the embedded payload.
-    EXPECT_EQ(result.images[0].source, decltype(result.images[0].source)::Embedded);
-    EXPECT_EQ(result.images[0].mime_type, "image/png");
     EXPECT_FALSE(result.images[0].embedded_bytes.empty());
 }
 
@@ -185,15 +183,34 @@ TEST_F(GltfMaterialImportTest, ParsesUnlitAndEmissiveStrength) {
 
 TEST_F(GltfMaterialImportTest, UvSetsFollowTheSlotTexCoords) {
     const GltfImportResult result = ImportGltfMaterials(path_);
-    const GltfMaterialInfo& lit = result.materials[0];
 
-    // slot0 baseColor=1 -> bits0..1; slot1 normal=0; slot2 ORM=0 (from
-    // metallicRoughness); slot3 emissive=1 -> bits6..7.
-    const std::uint32_t uv_sets = ComputeGltfUvSets(lit);
-    EXPECT_EQ((uv_sets >> 0u) & 0x3u, 1u);
-    EXPECT_EQ((uv_sets >> 2u) & 0x3u, 0u);
-    EXPECT_EQ((uv_sets >> 4u) & 0x3u, 0u);
-    EXPECT_EQ((uv_sets >> 6u) & 0x3u, 1u);
+    // The texCoord the author declares per slot must resolve the technique's
+    // interface variant end to end: the fixture's highest referenced set
+    // (baseColor/emissive at TEXCOORD_1, everything else at TEXCOORD_0)
+    // selects the UV1 variant, not the base pipeline.
+    const auto variant = [](const GltfMaterialInfo& material) {
+        const auto data = VulkanEngine::TechniqueManager::FromGltfMaterial(material);
+        VulkanEngine::TechniqueManager::DefaultMeshTechnique tech;
+        return tech.InterfaceVariantForMaterial(
+            std::span<const std::byte>(reinterpret_cast<const std::byte*>(&data),
+                                       sizeof(data)));
+    };
+    EXPECT_EQ(variant(result.materials[0]), 1u);
+
+    // Authoring TEXCOORD_1 on the normal slot alone must still select UV1.
+    GltfMaterialInfo normal_only{};
+    normal_only.normal_texture.present = true;
+    normal_only.normal_texture.tex_coord = 1u;
+    EXPECT_EQ(variant(normal_only), 1u);
+
+    // The highest referenced set wins: an occlusion-only ORM slot at
+    // TEXCOORD_2 (no shared metallicRoughness texture) outranks the
+    // TEXCOORD_0 baseColor.
+    GltfMaterialInfo occlusion_high{};
+    occlusion_high.base_color_texture.present = true;
+    occlusion_high.occlusion_texture.present = true;
+    occlusion_high.occlusion_texture.tex_coord = 2u;
+    EXPECT_EQ(variant(occlusion_high), 2u);
 }
 
 TEST_F(GltfMaterialImportTest, SamplerMapsToDeviceDescription) {

@@ -23,6 +23,11 @@ std::filesystem::path ScratchBase() {
     return base;
 }
 
+[[nodiscard]] std::string ReadTextFile(const std::filesystem::path& path) {
+    std::ifstream stream(path);
+    return {std::istreambuf_iterator<char>(stream), std::istreambuf_iterator<char>()};
+}
+
 VulkanShared::Storage::Storage MakeStorage(const std::filesystem::path& base) {
     VulkanShared::UserPaths::Roots roots{};
     roots.persistent = base;
@@ -129,15 +134,49 @@ TEST(ProfileStoreTest, DeleteRemovesProfileAndItsCredential) {
         id = store->AddProfile("alice", "Alice").id;
         store->SetToken(id, std::string(64, 'c'));
         store->RecordRun(0x1, 5, 10, "Alice");
-        ASSERT_TRUE(std::filesystem::exists(storage.SavePath("profile-" + id)));
+        ASSERT_FALSE(id.empty());
+        // The credential and the index must exist before we try to prove the
+        // profile is gone from disk.
+        ASSERT_TRUE(std::filesystem::exists(storage.SaveDir()));
+        ASSERT_TRUE(std::filesystem::exists(base / "settings.json"));
 
         ASSERT_TRUE(store->RemoveProfile(id));
         EXPECT_TRUE(store->Profiles().empty());
         EXPECT_TRUE(store->ActiveId().empty());
-        // The private slot holding the token must not survive the profile.
-        EXPECT_FALSE(std::filesystem::exists(storage.SavePath("profile-" + id)));
     }
     {
+        // The security property: no file left on disk still references the
+        // deleted profile — neither its id (which the private credential slot
+        // and the index both used to carry) nor its token. Enumerate the
+        // store's own directories through the public SaveDir() accessor and the
+        // harness persistent root instead of pinning the private slot naming.
+        bool saw_any_file = false;
+        std::error_code iter_ec;
+        for (const auto& dir : {std::filesystem::path{base}, storage.SaveDir()}) {
+            for (const std::filesystem::directory_entry& entry :
+                 std::filesystem::directory_iterator(dir, iter_ec)) {
+                if (!entry.is_regular_file(iter_ec)) {
+                    continue;
+                }
+                saw_any_file = true;
+                const std::string contents = ReadTextFile(entry.path());
+                // The credential only ever lived in the private per-profile
+                // slot, so it must be gone from every file, the recovery backup
+                // included.
+                EXPECT_EQ(contents.find(std::string(64, 'c')), std::string::npos)
+                    << entry.path() << " still carries the deleted profile's token";
+                // The id must be gone from the live files. settings.json.bak is
+                // exempt: Storage keeps exactly the previous config generation
+                // for hand-recovery, and the index carries ids, never secrets.
+                if (entry.path() == storage.ConfigBackupPath()) {
+                    continue;
+                }
+                EXPECT_EQ(contents.find(id), std::string::npos)
+                    << entry.path() << " still references the deleted profile";
+            }
+        }
+        ASSERT_TRUE(saw_any_file) << "the storage write nothing under " << base;
+
         auto store = ProfileStore::Create(storage);
         ASSERT_TRUE(store.has_value());
         EXPECT_TRUE(store->Profiles().empty());
@@ -157,9 +196,8 @@ TEST(ProfileStoreTest, DisplayNameAndLocalSettingsUpdate) {
 
     ASSERT_TRUE(store->UpdateDisplayName(id, "Carol Two"));
     Examples::InfiniteRunner::Leaderboard::LocalSettings local = store->Active()->local;
-    // Best-per-player is the default; flip it and set the extra filter so the
-    // round trip is observable.
-    EXPECT_TRUE(local.leaderboard_best_per_account);
+    // Flip the flags so the round trip is observable, whatever the defaults of
+    // the board-owned settings struct are.
     local.leaderboard_best_per_account = false;
     local.leaderboard_only_mine = true;
     ASSERT_TRUE(store->UpdateLocal(id, local));

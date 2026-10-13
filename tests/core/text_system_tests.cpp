@@ -4,6 +4,7 @@ import std;
 import std.compat;
 
 import FileLoader.Types;
+import VulkanEngine.Render.Passes.WorldTextPass;
 import VulkanEngine.ResourceSystem;
 import VulkanEngine.ResourceSystem.FontResource;
 import VulkanEngine.Text.Atlas;
@@ -293,6 +294,17 @@ TEST(TextSystemTest, FontReloaderIgnoresUnwatchedPaths) {
     EXPECT_EQ(system.GetFace(id)->UniqueId(), face_id);
     reloader.Shutdown();
     watcher.Stop();
+}
+
+// No-flag runs keep historical MSDF behavior — backward-compat contract. The
+// engine's documented default world-text rasterizer must not silently flip to
+// Slug (a different sampler and instance layout) without a deliberate update
+// here; every run that does not name a backend inherits this value through
+// RendererConfig.
+TEST(TextBackendDefaultTest, NoFlagRunsKeepHistoricalMsdfBehavior) {
+    using VulkanEngine::SceneRenderer::kDefaultTextBackend;
+    using VulkanEngine::SceneRenderer::TextBackend;
+    EXPECT_EQ(TextBackend::Msdf, kDefaultTextBackend);
 }
 
 }  // namespace

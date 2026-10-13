@@ -22,9 +22,12 @@ TEST(BalanceConfigTest, FingerprintIsDeterministic) {
     EXPECT_EQ(BalanceConfig{}.Hash(), BalanceConfig{}.Hash());
 }
 
-// Every gameplay-affecting field must participate in the fingerprint; a field
-// that silently stopped being hashed would merge two different rulesets onto
-// one leaderboard.
+// INTENTIONAL: every gameplay-affecting field must participate in the
+// fingerprint; a field that silently stopped being hashed would merge two
+// different rulesets onto one leaderboard. This per-field sweep is a deliberate
+// tripwire, not a mirror of the hasher — do not fold it away as redundant with
+// the golden value above. A golden hash can only catch a change to *some*
+// field; this catches a change to *each* one.
 TEST(BalanceConfigTest, EveryFieldChangesTheFingerprint) {
     const BalanceConfig base{};
     const std::uint64_t baseline = base.Hash();
@@ -55,9 +58,14 @@ TEST(BalanceConfigTest, EveryFieldChangesTheFingerprint) {
     EXPECT_NE(changed([](BalanceConfig& c) { c.difficulty_scaling_divider += 0.1f; }), baseline);
 }
 
+// The getter documents wall spacing as the span each wall occupies: `wall_count`
+// spacings must cover the corridor from spawn to recycle exactly. Assert the
+// invariant the getter documents rather than re-deriving the value, so a
+// reformulation that keeps the corridor covered still passes.
 TEST(BalanceConfigTest, WallSpacingIsDerivedFromFields) {
-    BalanceConfig c{};
-    EXPECT_FLOAT_EQ(c.WallSpacing(), (c.wall_recycle_z - c.wall_spawn_z) / static_cast<float>(c.wall_count));
+    const BalanceConfig c{};
+    EXPECT_FLOAT_EQ(c.WallSpacing() * static_cast<float>(c.wall_count),
+                    c.wall_recycle_z - c.wall_spawn_z);
 }
 
 } // namespace

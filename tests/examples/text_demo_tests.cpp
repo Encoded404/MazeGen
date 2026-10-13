@@ -48,15 +48,16 @@ TEST(TextDemoConfigTest, SelectionReachesRendererConfig) {
     for (const TextBackend backend : {TextBackend::Msdf, TextBackend::Slug}) {
         const RendererConfig config = MakeRendererConfig(backend);
         EXPECT_EQ(config.text_backend, backend);
-        // Both backends still register the screen-space overlay: the world
-        // selector does not govern the screen path.
+        // The screen-space overlay registration is the example's own mapping
+        // output: both backends must still request it.
         EXPECT_TRUE(config.enable_text);
     }
 
-    // The default spelling maps onto the engine's own default, so a run with no
-    // flag is exactly the historical MSDF behaviour.
-    EXPECT_EQ(TextBackend::Msdf, kDefaultTextBackend);
-    EXPECT_EQ(MakeRendererConfig(TextBackend::Msdf).text_backend, kDefaultTextBackend);
+    // The example maps the engine's default straight through, so a no-flag run
+    // gets whatever backend the engine documents as its default. The engine-
+    // owned value of kDefaultTextBackend is asserted in the engine's
+    // text-system tests; only the pass-through is the example's business.
+    EXPECT_EQ(MakeRendererConfig(kDefaultTextBackend).text_backend, kDefaultTextBackend);
 }
 
 // The pass routes a queue call for the wrong family to a no-op, so the example's

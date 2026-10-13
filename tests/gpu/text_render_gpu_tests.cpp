@@ -1,5 +1,7 @@
 #include <gtest/gtest.h>
 
+#include "test_text_shader_abi.hpp"
+
 import std;
 import std.compat;
 
@@ -57,9 +59,17 @@ using VulkanEngine::Text::GlyphRasterizer;
 using VulkanEngine::Text::ShapedRun;
 using VulkanEngine::Text::ShapeOptions;
 using VulkanEngine::Text::ShapeText;
+using TestSupport::TextShaderAbi::kBindlessDescriptorSet;
+using TestSupport::TextShaderAbi::kFirstAppDescriptorSet;
+using TestSupport::TextShaderAbi::kUiTextInstanceBinding;
+using TestSupport::TextShaderAbi::kUiTextInstanceBytes;
+using TestSupport::TextShaderAbi::kUiTextPushConstantBytes;
 
 constexpr std::uint32_t kTargetSize = 256;
 constexpr std::uint32_t kPageSize = 256;
+
+static_assert(kUiTextInstanceBytes == sizeof(TextInstance),
+              "the shared text ABI must mirror the engine's TextInstance layout");
 
 // The scene colour the text composites over: opaque black, so an ink pixel is
 // any pixel whose red channel rose above 0.
@@ -176,9 +186,11 @@ protected:
         const auto frag = Shaders::Engine::UiTextFrag::Register(*shaders_,
                                                                 VKENGINE_ENGINE_SHADER_DIR);
 
-        // Set 5: the instance storage buffer, one for the whole draw.
+        // Set kFirstAppDescriptorSet: the instance storage buffer, one for the
+        // whole draw.
         const vk::DescriptorSetLayoutBinding instance_binding(
-            0, vk::DescriptorType::eStorageBuffer, 1, vk::ShaderStageFlagBits::eVertex, nullptr);
+            kUiTextInstanceBinding, vk::DescriptorType::eStorageBuffer, 1,
+            vk::ShaderStageFlagBits::eVertex, nullptr);
         instance_layout_ = std::make_unique<vk::raii::DescriptorSetLayout>(
             backend_.GetDevice(), vk::DescriptorSetLayoutCreateInfo{{}, 1, &instance_binding});
         const vk::DescriptorPoolSize pool_size(vk::DescriptorType::eStorageBuffer, 1);
@@ -199,19 +211,19 @@ protected:
         instance_info.range = vk::WholeSize;
         vk::WriteDescriptorSet instance_write{};
         instance_write.dstSet = **instance_set_;
-        instance_write.dstBinding = 0;
+        instance_write.dstBinding = kUiTextInstanceBinding;
         instance_write.descriptorCount = 1;
         instance_write.descriptorType = vk::DescriptorType::eStorageBuffer;
         instance_write.pBufferInfo = &instance_info;
         backend_.GetDevice().updateDescriptorSets({instance_write}, {});
 
-        // The shader names set 0 (bindless) and set 5 (instances); sets 1-4 are
-        // reserved and must exist as empty layouts so set 5 lands where the
-        // shader says.
+        // The shader names set 0 (bindless) and set kFirstAppDescriptorSet
+        // (instances); the reserved sets in between are empty layouts so the app
+        // set lands where the shader says.
         const std::array<vk::DescriptorSetLayout, 6> set_layouts{
             *bindless_->GetLayout(), {}, {}, {}, {}, **instance_layout_};
         const vk::PushConstantRange push_range(vk::ShaderStageFlagBits::eVertex, 0,
-                                               2U * sizeof(float));
+                                               kUiTextPushConstantBytes);
         vk::PipelineLayoutCreateInfo layout_info{};
         layout_info.setSetLayouts(set_layouts);
         layout_info.setPushConstantRanges(push_range);
@@ -378,10 +390,10 @@ protected:
                                                         **instance_set_};
             const std::array<vk::DescriptorSet, 1> set0{sets[0]};
             const std::array<vk::DescriptorSet, 1> set5{sets[1]};
-            cmd.bindDescriptorSets(vk::PipelineBindPoint::eGraphics, **pipeline_layout_, 0, set0,
-                                   {});
-            cmd.bindDescriptorSets(vk::PipelineBindPoint::eGraphics, **pipeline_layout_, 5, set5,
-                                   {});
+            cmd.bindDescriptorSets(vk::PipelineBindPoint::eGraphics, **pipeline_layout_,
+                                   kBindlessDescriptorSet, set0, {});
+            cmd.bindDescriptorSets(vk::PipelineBindPoint::eGraphics, **pipeline_layout_,
+                                   kFirstAppDescriptorSet, set5, {});
             const std::array<float, 2> screen_size{static_cast<float>(kTargetSize),
                                                    static_cast<float>(kTargetSize)};
             cmd.pushConstants<float>(**pipeline_layout_, vk::ShaderStageFlagBits::eVertex, 0,

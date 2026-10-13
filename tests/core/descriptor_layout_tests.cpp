@@ -59,8 +59,9 @@ TEST(DescriptorLayoutTest, ComposesEngineAndAppSetsContiguously) {
 
     const auto layout = composer.Compose();
     ASSERT_TRUE(layout.has_value());
-    ASSERT_EQ(layout->sets.size(), 7u);
-    for (std::uint32_t set = 0; set < 7; ++set) {
+    // Engine sets first, then the two app sets, all contiguous.
+    ASSERT_EQ(layout->sets.size(), kEngineDescriptorSetCount + 2u);
+    for (std::uint32_t set = 0; set < kEngineDescriptorSetCount + 2; ++set) {
         EXPECT_EQ(layout->sets[set].set, set);
     }
     EXPECT_EQ(layout->sets[5].bindings.front().binding, 0u);

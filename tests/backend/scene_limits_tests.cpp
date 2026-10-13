@@ -20,24 +20,40 @@ TEST(SceneLimitsTest, EntriesPerBlockMirrorsTheShaderConstant) {
 TEST(SceneLimitsTest, PlanStorageBufferCountsMatchTheirLayouts) {
     constexpr std::uint32_t blocks = 8;
 
+    // Every count is derived from the plan's named fields, so a wrong
+    // StorageBuffersForPlan (or a plan row that moved) fails this instead of
+    // agreeing with a copied literal.
+    const auto field_derived = [&](const SetPlan& plan) {
+        return plan.block_bindings * blocks + plan.single_storage_buffers;
+    };
+
     // submesh-vertex: one block array.
-    EXPECT_EQ(StorageBuffersForPlan(kSubmeshVertexPlan, blocks), blocks);
+    EXPECT_EQ(StorageBuffersForPlan(kSubmeshVertexPlan, blocks),
+              field_derived(kSubmeshVertexPlan));
     // expand: 4 block arrays + 3 singles.
-    EXPECT_EQ(StorageBuffersForPlan(kExpandPlan, blocks), 4u * blocks + 3u);
+    EXPECT_EQ(StorageBuffersForPlan(kExpandPlan, blocks), field_derived(kExpandPlan));
     // occlusion: 4 block arrays + 4 singles.
-    EXPECT_EQ(StorageBuffersForPlan(kOcclusionPlan, blocks), 4u * blocks + 4u);
+    EXPECT_EQ(StorageBuffersForPlan(kOcclusionPlan, blocks), field_derived(kOcclusionPlan));
     // occluder-select: 3 block arrays + 5 singles.
-    EXPECT_EQ(StorageBuffersForPlan(kOccluderSelectPlan, blocks), 3u * blocks + 5u);
+    EXPECT_EQ(StorageBuffersForPlan(kOccluderSelectPlan, blocks),
+              field_derived(kOccluderSelectPlan));
     // collect: 1 block array + 5 singles.
-    EXPECT_EQ(StorageBuffersForPlan(kCollectPlan, blocks), blocks + 5u);
+    EXPECT_EQ(StorageBuffersForPlan(kCollectPlan, blocks), field_derived(kCollectPlan));
 }
 
-TEST(SceneLimitsTest, WorstCaseSetIsTheDepthGraphicsStageSum) {
-    // The per-stage row models submesh-vertex blocks plus the fixed vertex/UV
-    // tables; at any realistic block count it dominates the per-set rows.
+TEST(SceneLimitsTest, MaxStorageBuffersPerSetIsTheMaxOfThePlanTable) {
+    // MaxStorageBuffersPerSet documents "largest single-set storage-buffer
+    // count across all plans", so the pin recomputes that max from
+    // kSceneSetPlans: a plan row left out of the max, or a max that drifts
+    // from the table, fails here. At any realistic block count the winner is
+    // the depth-graphics stage row (submesh-vertex blocks plus the fixed
+    // vertex/UV tables).
     constexpr std::uint32_t blocks = 16;
-    EXPECT_EQ(MaxStorageBuffersPerSet(blocks),
-              blocks + kMaxVertexBuffers + kMaxUvBuffers);
+    std::uint32_t worst = 0;
+    for (const SetPlan& plan : kSceneSetPlans) {
+        worst = std::max(worst, StorageBuffersForPlan(plan, blocks));
+    }
+    EXPECT_EQ(MaxStorageBuffersPerSet(blocks), worst);
 }
 
 TEST(SceneLimitsTest, HugeLimitsLeaveTheCeilingInPlace) {

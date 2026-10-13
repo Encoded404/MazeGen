@@ -30,7 +30,13 @@ AccountStoreOptions MemoryStore() {
 
 TEST(UsernameTest, CanonicalizesAndValidates) {
     EXPECT_EQ(CanonicalizeUsername("  Alice  "), std::optional<std::string>{"alice"});
-    EXPECT_FALSE(CanonicalizeUsername("ab").has_value());          // too short
+    // The length boundaries come from the named constants: one below the
+    // minimum is rejected, the minimum is accepted, the maximum is accepted, and
+    // one above the maximum is rejected.
+    EXPECT_FALSE(CanonicalizeUsername(std::string(kUsernameMinLength - 1, 'a')).has_value());
+    EXPECT_TRUE(CanonicalizeUsername(std::string(kUsernameMinLength, 'a')).has_value());
+    EXPECT_TRUE(CanonicalizeUsername(std::string(kUsernameMaxLength, 'a')).has_value());
+    EXPECT_FALSE(CanonicalizeUsername(std::string(kUsernameMaxLength + 1, 'a')).has_value());
     EXPECT_FALSE(CanonicalizeUsername("1alice").has_value());      // must start with a letter
     EXPECT_FALSE(CanonicalizeUsername("al ice").has_value());      // space
     EXPECT_FALSE(CanonicalizeUsername("alice!").has_value());      // punctuation
@@ -40,6 +46,10 @@ TEST(DisplayNameTest, SanitizesDisplayNames) {
     EXPECT_EQ(SanitizeDisplayName("  Alice  "), std::optional<std::string>{"Alice"});
     EXPECT_FALSE(SanitizeDisplayName("").has_value());
     EXPECT_FALSE(SanitizeDisplayName("bad\nname").has_value());
+    // The display-name length limit is the named constant: exactly at it is
+    // accepted, one past it is rejected.
+    EXPECT_TRUE(SanitizeDisplayName(std::string(kDisplayNameMaxLength, 'A')).has_value());
+    EXPECT_FALSE(SanitizeDisplayName(std::string(kDisplayNameMaxLength + 1, 'A')).has_value());
 }
 
 TEST(AccountStoreTest, RegisterLoginRoundTrip) {
@@ -214,7 +224,21 @@ TEST(NamePolicyTest, LoadsFromFile) {
     }
 
     const NamePolicy policy = LoadNamePolicy(path);
-    EXPECT_EQ(policy.blocked, (std::vector<std::string>{"badword", "fuck"}));
+    // Per-entry membership plus behavior instead of pinning the exact blocked
+    // vector. The count still covers the semantics of the input: two of the
+    // three block directives survive (case-dedupe drops one) and the separator
+    // compaction turns "f.u.c.k" into a single entry.
+    EXPECT_EQ(policy.blocked.size(), 2U);
+    const auto contains = [&policy](std::string_view entry) {
+        return std::find(policy.blocked.begin(), policy.blocked.end(), entry) !=
+               policy.blocked.end();
+    };
+    EXPECT_TRUE(contains("badword"));
+    EXPECT_TRUE(contains("fuck"));
+    // Every loaded block entry must actually fire as written.
+    for (const std::string& entry : policy.blocked) {
+        EXPECT_TRUE(policy.Check(entry).has_value()) << entry;
+    }
     EXPECT_TRUE(policy.allowed.contains("badworder"));
     EXPECT_FALSE(policy.Check("badworder").has_value()); // allowed root covers the block
     EXPECT_TRUE(policy.Check("badword").has_value());

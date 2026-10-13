@@ -7,6 +7,8 @@
 
 #include <gtest/gtest.h>
 
+#include "crash_scenario.hpp"
+
 #include <csignal>
 
 import std;
@@ -55,19 +57,6 @@ ProbeRun RunProbe(const std::string& type) {
     return run;
 }
 
-// Every report must carry the report header, the active stage, the breadcrumb
-// and the log ring tail (which still holds the marker line).
-void ExpectCapturedContext(const ProbeRun& run) {
-    ASSERT_TRUE(run.report_exists);
-    EXPECT_NE(run.report.find("VULKANENGINE CRASH REPORT"), std::string::npos);
-    EXPECT_NE(run.report.find("app: crash_probe"), std::string::npos);
-    EXPECT_NE(run.report.find("stage: probe stage"), std::string::npos);
-    EXPECT_NE(run.report.find("crumb = 7"), std::string::npos);
-    EXPECT_NE(run.report.find("MARKER-LINE-12345"), std::string::npos);
-    // The session log is the on-disk copy, written line by line as logging happens.
-    EXPECT_NE(run.session.find("MARKER-LINE-12345"), std::string::npos);
-}
-
 std::size_t CountOccurrences(const std::string& haystack, const std::string& needle) {
     std::size_t count = 0;
     std::size_t pos = 0;
@@ -76,6 +65,33 @@ std::size_t CountOccurrences(const std::string& haystack, const std::string& nee
         pos += needle.size();
     }
     return count;
+}
+
+// Every fault report must preserve the probe's context: the app and stage
+// values it was told to record, the breadcrumbs it emitted (as a count, not a
+// pinned format), and the log tail (which still holds the marker line). The
+// surrounding report wording is the engine's choice and is not asserted.
+void ExpectCapturedContext(const ProbeRun& run) {
+    ASSERT_TRUE(run.report_exists);
+    EXPECT_NE(run.report.find("crash_probe"), std::string::npos);
+    EXPECT_NE(run.report.find("probe stage"), std::string::npos);
+    EXPECT_EQ(CountOccurrences(run.report, "probe-crumb-"),
+              static_cast<std::size_t>(vkengine_test::crash_scenario::kCrumbs));
+    EXPECT_NE(run.report.find("MARKER-LINE-12345"), std::string::npos);
+    // The session log is the on-disk copy, written line by line as logging happens.
+    EXPECT_NE(run.session.find("MARKER-LINE-12345"), std::string::npos);
+}
+
+// The report must carry the OS-reported signal number itself (on Windows the
+// mapped structured-exception code); how it labels it is presentation.
+void ExpectSignalReported(const ProbeRun& run, int expected_number) {
+#ifdef _WIN32
+    static_cast<void>(expected_number);
+#else
+    const std::string number = std::to_string(expected_number);
+    EXPECT_NE(run.report.find(number), std::string::npos)
+        << "report does not mention OS-reported signal number " << number;
+#endif
 }
 
 } // namespace
@@ -91,15 +107,16 @@ TEST(CrashHandler, ReportWritesReportWithoutTerminating) {
     const ProbeRun run = RunProbe("report");
     EXPECT_EQ(run.status, 0);
     ExpectCapturedContext(run);
-    EXPECT_NE(run.report.find("reason: probe report"), std::string::npos);
-    EXPECT_NE(run.report.find("detail: probe detail"), std::string::npos);
+    // The probe-supplied reason and detail values, not the surrounding wording.
+    EXPECT_NE(run.report.find("probe report"), std::string::npos);
+    EXPECT_NE(run.report.find("probe detail"), std::string::npos);
 }
 
 TEST(CrashHandler, FatalTerminatesAndReports) {
     const ProbeRun run = RunProbe("fatal");
     EXPECT_NE(run.status, 0);
     ExpectCapturedContext(run);
-    EXPECT_NE(run.report.find("reason: probe fatal"), std::string::npos);
+    EXPECT_NE(run.report.find("probe fatal"), std::string::npos);
 }
 
 class CrashTypeTest : public ::testing::TestWithParam<const char*> {};
@@ -124,36 +141,32 @@ INSTANTIATE_TEST_SUITE_P(
 TEST(CrashHandler, SegfaultReasonMatchesPlatform) {
     const ProbeRun run = RunProbe("segv");
     ASSERT_TRUE(run.report_exists);
+    ExpectCapturedContext(run);
+    ExpectSignalReported(run, static_cast<int>(SIGSEGV));
 #ifdef _WIN32
-    EXPECT_NE(run.report.find("reason: structured exception"), std::string::npos);
+    // The OS-reported structured-exception code for an access violation.
     EXPECT_NE(run.report.find("0xc0000005"), std::string::npos);
-#else
-    EXPECT_NE(run.report.find("reason: signal"), std::string::npos);
-    EXPECT_NE(run.report.find("signal: 11"), std::string::npos);
 #endif
 }
 
 TEST(CrashHandler, AbortReasonMatchesPlatform) {
     const ProbeRun run = RunProbe("abort");
     ASSERT_TRUE(run.report_exists);
-#ifdef _WIN32
-    EXPECT_NE(run.report.find("reason: SIGABRT"), std::string::npos);
-#else
-    EXPECT_NE(run.report.find("reason: signal"), std::string::npos);
-    EXPECT_NE(run.report.find("signal: 6"), std::string::npos);
-#endif
+    ExpectCapturedContext(run);
+    ExpectSignalReported(run, static_cast<int>(SIGABRT));
 }
 
 TEST(CrashHandler, UnhandledExceptionReportsTerminate) {
     const ProbeRun run = RunProbe("throw");
     ASSERT_TRUE(run.report_exists);
-    EXPECT_NE(run.report.find("reason: std::terminate"), std::string::npos);
+    // The report identifies the terminate path without pinning its wording.
+    EXPECT_NE(run.report.find("terminate"), std::string::npos);
 }
 
 TEST(CrashHandler, ExplicitTerminateIsReported) {
     const ProbeRun run = RunProbe("terminate");
     ASSERT_TRUE(run.report_exists);
-    EXPECT_NE(run.report.find("reason: std::terminate"), std::string::npos);
+    EXPECT_NE(run.report.find("terminate"), std::string::npos);
 }
 
 // A large burst of lines must survive clean exit even though the session log is
@@ -162,7 +175,8 @@ TEST(CrashHandler, BulkLogIsCompleteOnCleanExit) {
     const ProbeRun run = RunProbe("bulk");
     EXPECT_EQ(run.status, 0);
     EXPECT_FALSE(run.report_exists);
-    EXPECT_EQ(CountOccurrences(run.session, "BULK-"), 5000u);
+    EXPECT_EQ(CountOccurrences(run.session, "BULK-"),
+              static_cast<std::size_t>(vkengine_test::crash_scenario::kBulkLines));
     EXPECT_NE(run.session.find("BULK-000000"), std::string::npos);
     EXPECT_NE(run.session.find("BULK-004999"), std::string::npos);
 }
@@ -172,7 +186,8 @@ TEST(CrashHandler, BulkLogIsCompleteOnCleanExit) {
 TEST(CrashHandler, BulkLogIsCompleteAfterCrash) {
     const ProbeRun run = RunProbe("bulk-crash");
     EXPECT_NE(run.status, 0);
-    EXPECT_EQ(CountOccurrences(run.session, "BULK-"), 5000u);
+    EXPECT_EQ(CountOccurrences(run.session, "BULK-"),
+              static_cast<std::size_t>(vkengine_test::crash_scenario::kBulkLines));
 }
 
 // Several threads are alive with unflushed buffers at fault time; the handler
@@ -180,14 +195,16 @@ TEST(CrashHandler, BulkLogIsCompleteAfterCrash) {
 TEST(CrashHandler, FaultDrainsAllThreadBuffers) {
     const ProbeRun run = RunProbe("mt-crash");
     EXPECT_NE(run.status, 0);
-    for (int id = 0; id < 4; ++id) {
-        for (int i = 0; i < 10; ++i) {
+    for (int id = 0; id < vkengine_test::crash_scenario::kMtThreads; ++id) {
+        for (int i = 0; i < vkengine_test::crash_scenario::kMtLinesPerThread; ++i) {
             char line[64];
             std::snprintf(line, sizeof(line), "MT-%d-LINE-%02d", id, i);
             EXPECT_NE(run.session.find(line), std::string::npos) << line;
         }
     }
-    EXPECT_EQ(CountOccurrences(run.session, "MT-"), 40u);
+    EXPECT_EQ(CountOccurrences(run.session, "MT-"),
+              static_cast<std::size_t>(vkengine_test::crash_scenario::kMtThreads *
+                                       vkengine_test::crash_scenario::kMtLinesPerThread));
 }
 
 // A thread that logs and exits flushes its own buffer, independent of Shutdown.
@@ -205,7 +222,9 @@ TEST(CrashHandler, LongLineIsWrittenIntact) {
     EXPECT_EQ(run.status, 0);
     EXPECT_NE(run.session.find("LONG-BEGIN"), std::string::npos);
     EXPECT_NE(run.session.find("LONG-END"), std::string::npos);
-    EXPECT_NE(run.session.find(std::string(40000, 'x')), std::string::npos);
+    EXPECT_NE(run.session.find(
+                  std::string(static_cast<std::size_t>(vkengine_test::crash_scenario::kLongLineBytes), 'x')),
+              std::string::npos);
 }
 
 // An explicit Flush() makes the log current without waiting for a full buffer

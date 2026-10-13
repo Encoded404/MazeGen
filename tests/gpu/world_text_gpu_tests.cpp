@@ -1,5 +1,7 @@
 #include <gtest/gtest.h>
 
+#include "test_text_shader_abi.hpp"
+
 #include <glm/glm.hpp> // NOLINT(misc-include-cleaner)
 #include <glm/gtc/quaternion.hpp> // NOLINT(misc-include-cleaner)
 
@@ -80,9 +82,28 @@ using VulkanEngine::Text::MsdfGenerator;
 using VulkanEngine::Text::ShapedRun;
 using VulkanEngine::Text::ShapeOptions;
 using VulkanEngine::Text::ShapeText;
+using TestSupport::TextShaderAbi::kBindlessDescriptorSet;
+using TestSupport::TextShaderAbi::kFirstAppDescriptorSet;
+using TestSupport::TextShaderAbi::kSlugTextBlobBinding;
+using TestSupport::TextShaderAbi::kSlugTextInstanceBinding;
+using TestSupport::TextShaderAbi::kSlugTextInstanceBytes;
+using TestSupport::TextShaderAbi::kSlugTextPushConstantBytes;
+using TestSupport::TextShaderAbi::kWorldTextInstanceBinding;
+using TestSupport::TextShaderAbi::kWorldTextInstanceBytes;
+using TestSupport::TextShaderAbi::kWorldTextPushConstantBytes;
 
 constexpr std::uint32_t kTargetSize = 256;
 constexpr std::uint32_t kPageSize = 64;
+
+static_assert(kWorldTextInstanceBytes == sizeof(WorldTextInstance),
+              "the shared text ABI must mirror the engine's WorldTextInstance layout");
+static_assert(kSlugTextInstanceBytes == sizeof(SlugTextInstance),
+              "the shared text ABI must mirror the engine's SlugTextInstance layout");
+static_assert(kWorldTextPushConstantBytes == sizeof(WorldTextConstants),
+              "the shared text ABI must mirror the engine's world_text push constant block");
+static_assert(kSlugTextPushConstantBytes == sizeof(SlugTextConstants),
+              "the shared text ABI must mirror the engine's slug_text push constant block");
+
 // The instance buffer holds the text batch and the depth-writing occluder batch
 // in one allocation, so each draw binds its own descriptor set at its own
 // offset. 32 KiB is a multiple of every driver's storage-buffer offset
@@ -303,16 +324,20 @@ protected:
         const ShaderId slug_frag = Shaders::Engine::SlugTextFrag::Register(
             *shaders_, VKENGINE_ENGINE_SHADER_DIR);
 
-        // Set 5: the instance storage buffer at binding 0 (one buffer per draw)
-        // and, for the Slug backend, the blob storage buffer at binding 1. The
+        // Set kFirstAppDescriptorSet: the instance storage buffer at
+        // kWorldTextInstanceBinding (one buffer per draw) and, for the Slug
+        // backend, the blob storage buffer at kSlugTextBlobBinding. The
         // binding-1 stage flags are fragment-only, exactly as the pass's
         // DeclareBindings sets them: the Slug vertex does not read the blob, so
         // a vertex stage flag here would hide a layout mismatch. The MSDF
-        // shaders declare only binding 0 and never statically use binding 1.
+        // shaders declare only kWorldTextInstanceBinding and never statically
+        // use the blob binding.
         const std::array<vk::DescriptorSetLayoutBinding, 2> bindings{
-            vk::DescriptorSetLayoutBinding(0, vk::DescriptorType::eStorageBuffer, 1,
+            vk::DescriptorSetLayoutBinding(kWorldTextInstanceBinding,
+                                           vk::DescriptorType::eStorageBuffer, 1,
                                            vk::ShaderStageFlagBits::eVertex, nullptr),
-            vk::DescriptorSetLayoutBinding(1, vk::DescriptorType::eStorageBuffer, 1,
+            vk::DescriptorSetLayoutBinding(kSlugTextBlobBinding,
+                                           vk::DescriptorType::eStorageBuffer, 1,
                                            vk::ShaderStageFlagBits::eFragment, nullptr)};
         instance_layout_ = std::make_unique<vk::raii::DescriptorSetLayout>(
             backend_.GetDevice(),
@@ -346,7 +371,7 @@ protected:
         text_info.range = kOccluderOffset;
         vk::WriteDescriptorSet text_write{};
         text_write.dstSet = **text_set_;
-        text_write.dstBinding = 0;
+        text_write.dstBinding = kWorldTextInstanceBinding;
         text_write.descriptorCount = 1;
         text_write.descriptorType = vk::DescriptorType::eStorageBuffer;
         text_write.pBufferInfo = &text_info;
@@ -358,7 +383,7 @@ protected:
         occluder_info.range = kInstanceBytes - kOccluderOffset;
         vk::WriteDescriptorSet occluder_write{};
         occluder_write.dstSet = **occluder_set_;
-        occluder_write.dstBinding = 0;
+        occluder_write.dstBinding = kWorldTextInstanceBinding;
         occluder_write.descriptorCount = 1;
         occluder_write.descriptorType = vk::DescriptorType::eStorageBuffer;
         occluder_write.pBufferInfo = &occluder_info;
@@ -374,20 +399,22 @@ protected:
         blob_info.range = vk::WholeSize;
         vk::WriteDescriptorSet blob_write{};
         blob_write.dstSet = **slug_set_;
-        blob_write.dstBinding = 1;
+        blob_write.dstBinding = kSlugTextBlobBinding;
         blob_write.descriptorCount = 1;
         blob_write.descriptorType = vk::DescriptorType::eStorageBuffer;
         blob_write.pBufferInfo = &blob_info;
         backend_.GetDevice().updateDescriptorSets({slug_instance_write, blob_write}, {});
 
-        // The shader names set 0 (bindless) and set 5 (instances); sets 1-4 are
-        // reserved and must exist as empty layouts so set 5 lands where the
-        // shader says.
+        // The shader names set 0 (bindless) and set kFirstAppDescriptorSet
+        // (instances); the reserved sets in between are empty layouts so the app
+        // set lands where the shader says. The push constant is the 80-byte
+        // camera/atlas block (WorldTextConstants) the pass declares, vertex +
+        // fragment.
         const std::array<vk::DescriptorSetLayout, 6> set_layouts{
             *bindless_->GetLayout(), {}, {}, {}, {}, **instance_layout_};
         const vk::PushConstantRange push_range(vk::ShaderStageFlagBits::eVertex |
                                                    vk::ShaderStageFlagBits::eFragment,
-                                               0, sizeof(WorldTextConstants));
+                                               0, kWorldTextPushConstantBytes);
         vk::PipelineLayoutCreateInfo layout_info{};
         layout_info.setSetLayouts(set_layouts);
         layout_info.setPushConstantRanges(push_range);
@@ -629,7 +656,7 @@ protected:
         blob_info.range = vk::WholeSize;
         vk::WriteDescriptorSet blob_write{};
         blob_write.dstSet = **slug_set_;
-        blob_write.dstBinding = 1;
+        blob_write.dstBinding = kSlugTextBlobBinding;
         blob_write.descriptorCount = 1;
         blob_write.descriptorType = vk::DescriptorType::eStorageBuffer;
         blob_write.pBufferInfo = &blob_info;
@@ -870,8 +897,10 @@ protected:
     void BindInstanceSet(vk::CommandBuffer cmd, vk::DescriptorSet instance_set) const {
         const std::array<vk::DescriptorSet, 1> set0{bindless_->GetDescriptorSet()};
         const std::array<vk::DescriptorSet, 1> set5{instance_set};
-        cmd.bindDescriptorSets(vk::PipelineBindPoint::eGraphics, **pipeline_layout_, 0, set0, {});
-        cmd.bindDescriptorSets(vk::PipelineBindPoint::eGraphics, **pipeline_layout_, 5, set5, {});
+        cmd.bindDescriptorSets(vk::PipelineBindPoint::eGraphics, **pipeline_layout_,
+                               kBindlessDescriptorSet, set0, {});
+        cmd.bindDescriptorSets(vk::PipelineBindPoint::eGraphics, **pipeline_layout_,
+                               kFirstAppDescriptorSet, set5, {});
     }
 
     void PushSlugConstants(vk::CommandBuffer cmd) const {

@@ -13,6 +13,7 @@
 #include <csignal>
 
 #include "engine/core/bootstrap/Crash.hpp"
+#include "crash_scenario.hpp"
 
 import std;
 import std.compat;
@@ -24,7 +25,11 @@ constexpr const char* kMarker = "[probe] MARKER-LINE-12345";
 void EmitContext() {
     VulkanEngine::Crash::Stage("probe stage");
     VulkanEngine::Crash::LogLine(kMarker);
-    VulkanEngine::Crash::Breadcrumb("crumb", 7);
+    for (int i = 1; i <= vkengine_test::crash_scenario::kCrumbs; ++i) {
+        char name[32];
+        std::snprintf(name, sizeof(name), "probe-crumb-%d", i);
+        VulkanEngine::Crash::Breadcrumb(name, static_cast<unsigned long long>(i));
+    }
 }
 
 [[noreturn]] void TriggerCrash(const std::string& type) {
@@ -64,7 +69,7 @@ void LogBulk(int count, const char* prefix) {
 
 void LogLongLine() {
     std::string text = "LONG-BEGIN";
-    text.append(40000, 'x');
+    text.append(static_cast<std::size_t>(vkengine_test::crash_scenario::kLongLineBytes), 'x');
     text += "LONG-END";
     VulkanEngine::Crash::LogLine(text.c_str());
 }
@@ -81,14 +86,14 @@ void RunWorkerThread() {
 // Crash while several threads are alive and hold unflushed buffered lines, so
 // the fault handler has to drain every thread's buffer.
 [[noreturn]] void CrashWithLiveThreads() {
-    constexpr int kThreadCount = 4;
+    const int kThreadCount = vkengine_test::crash_scenario::kMtThreads;
     std::atomic<int> ready{0};
     std::atomic<bool> release{false};
     std::vector<std::thread> workers;
     workers.reserve(kThreadCount);
     for (int id = 0; id < kThreadCount; ++id) {
         workers.emplace_back([id, &ready, &release] {
-            for (int i = 0; i < 10; ++i) {
+            for (int i = 0; i < vkengine_test::crash_scenario::kMtLinesPerThread; ++i) {
                 char line[64];
                 std::snprintf(line, sizeof(line), "MT-%d-LINE-%02d", id, i);
                 VulkanEngine::Crash::LogLine(line);
@@ -129,11 +134,11 @@ int main(int argc, char** argv) {
         VulkanEngine::Crash::Fatal("probe fatal", "probe detail");
     }
     if (type == "bulk") {
-        LogBulk(5000, "BULK");
+        LogBulk(vkengine_test::crash_scenario::kBulkLines, "BULK");
         return 0;
     }
     if (type == "bulk-crash") {
-        LogBulk(5000, "BULK");
+        LogBulk(vkengine_test::crash_scenario::kBulkLines, "BULK");
         TriggerCrash("segv");
     }
     if (type == "long") {

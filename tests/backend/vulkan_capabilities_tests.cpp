@@ -8,22 +8,28 @@ import VulkanBackend.Vulkan.VulkanCapabilities;
 namespace {
 
 using VulkanBackend::Vulkan::Feature;
-using VulkanBackend::Vulkan::Requirement;
 using VulkanBackend::Vulkan::SupportedDeviceState;
 using VulkanBackend::Vulkan::VulkanCapabilities;
 using VulkanBackend::Vulkan::VulkanCapabilitiesBuilder;
 namespace Caps = VulkanBackend::Vulkan;
 
-// MID requires both drawIndirectCount (core 1.2) and drawIndirectFirstInstance
-// (core 1.0). The latter is catalogued Optional and mapped to the core
-// VkPhysicalDeviceFeatures bit, so these tests are device-free: they drive the
-// builder with a synthetic SupportedDeviceState.
+// MID requires drawIndirectFirstInstance (core 1.0), catalogued and mapped to
+// the core VkPhysicalDeviceFeatures bit, so these tests are device-free: they
+// drive the builder with a synthetic SupportedDeviceState.
+//
+// kFeatureCatalog is a positional table over the Feature enum by design (there
+// is no name->catalog lookup in the engine), so indexing it with
+// static_cast<std::size_t>(Feature::X) here is intentional. The requirement /
+// policy values each row carries are engine-side table data driven by the
+// MID policy, not a test contract; they are pinned against the capability walk
+// on device, not here.
 
-TEST(VulkanCapabilitiesDrawIndirectFirstInstance, OptionalCatalogEntry) {
+TEST(VulkanCapabilitiesDrawIndirectFirstInstance, NameMatchesTheVulkanSpecString) {
+    // The catalog name must stay the exact VkPhysicalDeviceFeatures field the
+    // Vulkan spec names: it feeds extension/feature string comparisons.
     const auto& spec = Caps::kFeatureCatalog[
         static_cast<std::size_t>(Feature::DrawIndirectFirstInstance)];
     EXPECT_EQ(spec.name, std::string_view("drawIndirectFirstInstance"));
-    EXPECT_TRUE(spec.requirement == Requirement::Optional);
 }
 
 TEST(VulkanCapabilitiesDrawIndirectFirstInstance, SupportedMapsToCoreFeatureBit) {

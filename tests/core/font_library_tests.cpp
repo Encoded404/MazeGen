@@ -43,10 +43,31 @@ TEST(FontLibraryTest, ReportsLinkedFreeTypeAndHarfBuzz) {
     // project overlay raises the port above the registry baseline for it.
     EXPECT_GE(versions.harfbuzz_major, 14u);
 
+    // The summary must serve the function GetLibraryVersions() serves -- name a
+    // runtime version for every library the API tracks -- but its exact wording
+    // is presentation and is not pinned here. The expected content is rendered
+    // from the API's own data, so a rephrased diagnostic that still reports the
+    // linked versions passes, and one that dropped a library or drifted from
+    // GetLibraryVersions() fails. A real header/runtime mismatch cannot be
+    // fabricated in-process, so the (optional) mismatch warning has no wording
+    // assertion either.
     const std::string summary = VulkanEngine::Text::FormatLibraryVersions();
-    EXPECT_NE(summary.find("FreeType"), std::string::npos) << summary;
-    EXPECT_NE(summary.find("HarfBuzz"), std::string::npos) << summary;
-    EXPECT_EQ(summary.find("does not match"), std::string::npos) << summary;
+    EXPECT_FALSE(summary.empty()) << summary;
+
+    const auto contains = [&summary](const std::string& needle) {
+        return summary.find(needle) != std::string::npos;
+    };
+    const auto triple = [](std::uint32_t major, std::uint32_t minor, std::uint32_t patch) {
+        return std::to_string(major) + "." + std::to_string(minor) + "." +
+               std::to_string(patch);
+    };
+    EXPECT_TRUE(contains(triple(versions.freetype_runtime_major,
+                                versions.freetype_runtime_minor,
+                                versions.freetype_runtime_patch)))
+        << summary;
+    EXPECT_TRUE(contains(triple(versions.harfbuzz_major, versions.harfbuzz_minor,
+                                versions.harfbuzz_micro)))
+        << summary;
 }
 
 // A second read must agree with the first: GetLibraryVersions() owns the

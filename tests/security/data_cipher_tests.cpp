@@ -1,5 +1,7 @@
 #include <gtest/gtest.h>
 
+#include "engine/security/cipher_format.hpp"
+
 import std;
 import std.compat;
 
@@ -10,6 +12,8 @@ namespace {
 using VulkanEngine::Security::CipherVariant;
 using VulkanEngine::Security::KeyRing;
 using VulkanEngine::Security::kKeyBytes;
+
+namespace fmt = vkengine::security::format;
 
 constexpr std::uint8_t kKeyId = 1;
 
@@ -75,11 +79,24 @@ TEST(DataCipherTest, TamperedCiphertextIsRejected) {
 TEST(DataCipherTest, TamperedHeaderVariantIsRejected) {
     const KeyRing ring = MakeRing();
     std::vector<std::byte> sealed = SealRandom(ring, CipherVariant::XChaCha20Poly1305, kKeyId, AsBytes("secret"));
-    ASSERT_GE(sealed.size(), 4U);
+    ASSERT_GE(sealed.size(), fmt::kHeaderFixedBytes);
 
-    // Claim the IETF variant while the payload is XChaCha: the tag must fail.
-    sealed[2] = static_cast<std::byte>(static_cast<std::uint16_t>(CipherVariant::ChaCha20Poly1305Ietf) & 0xFFU);
-    sealed[3] = std::byte{0};
+    // Envelope layout (cipher_format.hpp): the fixed header ends with the
+    // key_id byte and a reserved byte; the cipher-variant word is the u16
+    // directly before them — i.e. the two bytes of the fixed header that
+    // precede the key_id. Derive the poke positions from the layout constant.
+    const std::size_t kKeyIdPos = fmt::kHeaderFixedBytes - 2;
+    const std::size_t kVariantU16Pos = kKeyIdPos - 2;
+
+    // Claim the IETF variant via the format's own serializer while the payload
+    // is XChaCha: Open() must then select the wrong AEAD and fail on the tag.
+    fmt::WriteU16(
+        reinterpret_cast<std::uint8_t*>(sealed.data()) + kVariantU16Pos,
+        static_cast<std::uint16_t>(fmt::CipherVariant::ChaCha20Poly1305Ietf));
+
+    // The poke actually rewrote the variant word the header API reads.
+    ASSERT_TRUE(VulkanEngine::Security::PeekVariant(sealed).has_value());
+    EXPECT_EQ(*VulkanEngine::Security::PeekVariant(sealed), CipherVariant::ChaCha20Poly1305Ietf);
 
     EXPECT_FALSE(Open(ring, sealed).has_value());
 }

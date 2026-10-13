@@ -76,6 +76,13 @@ enum class ImageLayoutIntent : std::uint8_t {
     DepthReadOnly
 };
 
+// Number of ImageLayoutIntent enumerators above. Deliberately NOT a Count
+// enumerator: leaving the mapping switches without a Count case keeps their
+// exhaustiveness compiler-checked. This constant exists only so the intent
+// tests can static_assert completeness; update it (and those tests) whenever
+// the enum grows.
+inline constexpr std::uint32_t kImageLayoutIntentCount = 9;
+
 enum class QueueType : std::uint8_t {
     Graphics,
     Compute,
@@ -261,6 +268,18 @@ struct CompiledRenderGraph {
     std::vector<vk::DeviceSize> resource_buffer_sizes{};
     std::vector<vk::Format> resource_formats{};
     // NOLINTEND(misc-non-private-member-variables-in-classes)
+
+    // Explicit initial image layout the resource was compiled with, or nullopt
+    // when it carries no explicit initial state. Query API so callers do not
+    // index has_initial_state/initial_states directly.
+    [[nodiscard]] std::optional<vk::ImageLayout>
+    InitialImageLayoutFor(std::uint32_t resource_index) const;
+
+    // Final image layout the compiled graph transitions the resource to after
+    // its last use, or nullopt when no pass posts such a transition. Query API
+    // so callers do not walk passes' post_pass_transitions directly.
+    [[nodiscard]] std::optional<vk::ImageLayout>
+    FinalImageLayoutFor(std::uint32_t resource_index) const;
 
     void SetImportedResourceState(std::uint32_t resource_index, ResourceState state) const {
         if (resource_index < initial_states.size()) {
@@ -592,6 +611,30 @@ inline vk::ImageLayout IntentToImageLayout(ImageLayoutIntent intent) {
             return vk::ImageLayout::eDepthReadOnlyOptimal;
     }
     return vk::ImageLayout::eUndefined;
+}
+
+// Defined after IntentToImageLayout so the mapping is in scope; the
+// declarations live on CompiledRenderGraph.
+inline std::optional<vk::ImageLayout>
+CompiledRenderGraph::InitialImageLayoutFor(const std::uint32_t resource_index) const {
+    if (resource_index < has_initial_state.size() && resource_index < initial_states.size() &&
+        has_initial_state[resource_index]) {
+        return IntentToImageLayout(initial_states[resource_index].layout);
+    }
+    return std::nullopt;
+}
+
+inline std::optional<vk::ImageLayout>
+CompiledRenderGraph::FinalImageLayoutFor(const std::uint32_t resource_index) const {
+    std::optional<vk::ImageLayout> final_layout{};
+    for (const CompiledPass& pass : passes) {
+        for (const ResourceTransition& transition : pass.post_pass_transitions) {
+            if (transition.resource_index == resource_index) {
+                final_layout = IntentToImageLayout(transition.target_state.layout);
+            }
+        }
+    }
+    return final_layout;
 }
 
 // Inverse of IntentToImageLayout, and the only place a requested vk::ImageLayout

@@ -30,6 +30,26 @@ using VulkanEngine::ShaderSystem::ShaderManager;
 using VulkanEngine::ShaderSystem::ShaderId;
 using VulkanEngine::Textures::GpuTextureInfo;
 
+// ── The one shader-visibility mirror of GpuTextureInfo ─────────────────────
+//
+// The per-slot metadata element is six tightly packed 32-bit words, no padding
+// (CDataLayout StructuredBuffer in the engine bindless shaders), mirroring
+// `struct GpuTextureInfo` in engine/core/assets/TextureTypes.cppm. The word
+// order is the struct's field order: width, height, mip_levels, array_layers,
+// format (the numeric vk::Format), flags. Every place in this file that lays
+// out or reads the shader-side element uses these constants, and the static
+// assert pins the mirror to the engine struct so a divergence fails to compile.
+inline constexpr std::uint32_t kGpuTextureInfoWordCount = 6;
+inline constexpr std::uint32_t kGpuTextureInfoWidthWord = 0;
+inline constexpr std::uint32_t kGpuTextureInfoHeightWord = 1;
+inline constexpr std::uint32_t kGpuTextureInfoMipLevelsWord = 2;
+inline constexpr std::uint32_t kGpuTextureInfoArrayLayersWord = 3;
+inline constexpr std::uint32_t kGpuTextureInfoFormatWord = 4;
+inline constexpr std::uint32_t kGpuTextureInfoFlagsWord = 5;
+
+static_assert(sizeof(GpuTextureInfo) == kGpuTextureInfoWordCount * sizeof(std::uint32_t),
+              "GpuTextureInfo must stay six packed 32-bit words for the shader mirror");
+
 // The per-slot GpuTextureInfo buffer is shader-visible metadata: one element per
 // bindless slot describing the extent, chain, layer count and device format the
 // descriptor points at. These tests read it back through a real compute shader
@@ -57,8 +77,10 @@ protected:
             std::format("{}/test_texture_info.spv", VKENGINE_TEST_SHADER_DIR), "",
             ShaderStage::eCompute);
 
-        // Output buffer: six u32 per slot, host-visible so the test reads it back.
-        out_bytes_ = static_cast<vk::DeviceSize>(kCapacity) * 6U * sizeof(std::uint32_t);
+        // Output buffer: one GpuTextureInfo element (kGpuTextureInfoWordCount
+        // words) per slot, host-visible so the test reads it back.
+        out_bytes_ = static_cast<vk::DeviceSize>(kCapacity) * kGpuTextureInfoWordCount *
+                     sizeof(std::uint32_t);
         out_buffer_ = std::make_unique<GpuBuffer>(GpuBuffer::Create(
             backend_, out_bytes_, vk::BufferUsageFlagBits::eStorageBuffer,
             vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCoherent));
@@ -164,7 +186,7 @@ protected:
         backend_.GetGraphicsQueue().submit(submit, {});
         backend_.GetGraphicsQueue().waitIdle();
 
-        std::vector<std::uint32_t> words(kCapacity * 6U);
+        std::vector<std::uint32_t> words(kCapacity * kGpuTextureInfoWordCount);
         const void* mapped = out_buffer_->Map(0, out_bytes_);
         std::memcpy(words.data(), mapped, static_cast<std::size_t>(out_bytes_));
         out_buffer_->Unmap();
@@ -186,15 +208,17 @@ protected:
 
 namespace {
 
+// Rebuilds one engine-struct element from the raw words the shader wrote, at
+// the word offsets the single mirror block at the top of the file pins.
 GpuTextureInfo WordsToInfo(const std::vector<std::uint32_t>& words, std::uint32_t slot) {
     GpuTextureInfo info{};
-    const std::size_t base = static_cast<std::size_t>(slot) * 6U;
-    info.width = words[base + 0];
-    info.height = words[base + 1];
-    info.mip_levels = words[base + 2];
-    info.array_layers = words[base + 3];
-    info.format = words[base + 4];
-    info.flags = words[base + 5];
+    const std::size_t base = static_cast<std::size_t>(slot) * kGpuTextureInfoWordCount;
+    info.width = words[base + kGpuTextureInfoWidthWord];
+    info.height = words[base + kGpuTextureInfoHeightWord];
+    info.mip_levels = words[base + kGpuTextureInfoMipLevelsWord];
+    info.array_layers = words[base + kGpuTextureInfoArrayLayersWord];
+    info.format = words[base + kGpuTextureInfoFormatWord];
+    info.flags = words[base + kGpuTextureInfoFlagsWord];
     return info;
 }
 

@@ -60,12 +60,31 @@ TEST(VulkanBootstrapTest, DeviceLostStatusPersistsUntilShutdown) {
 
 // The acquire semaphore must not be waited on only at colour-attachment output:
 // a pass that samples the acquired backbuffer reads it in the fragment (or
-// compute) stage, which is earlier. `eAllCommands` is a distinct stage bit (not
-// a bitmask union), so this guards against a regression to the colour-only
-// wait that would race a shader read of the backbuffer.
+// compute) stage, which is earlier. Pinned as superset semantics rather than an
+// exact eAllCommands equality: whichever mask the engine picks must cover the
+// graphics stages AND the compute stage, guarding against a regression to the
+// colour-attachment-only wait that would race a shader read of the backbuffer.
+// eAllCommands / eAllGraphics are single bits, not unions of the concrete
+// stage bits, so a stage is "covered" when the mask holds the concrete bit or
+// an enclosing catch-all.
+bool CoversStage(vk::PipelineStageFlags mask, vk::PipelineStageFlagBits stage) {
+    if ((mask & vk::PipelineStageFlagBits::eAllCommands) != vk::PipelineStageFlags{}) {
+        return true;
+    }
+    if ((mask & vk::PipelineStageFlagBits::eAllGraphics) != vk::PipelineStageFlags{}) {
+        // The all-graphics macro covers everything except the compute/host
+        // stages; compute must then be present as its own bit.
+        return stage != vk::PipelineStageFlagBits::eComputeShader ||
+               (mask & stage) != vk::PipelineStageFlags{};
+    }
+    return (mask & stage) != vk::PipelineStageFlags{};
+}
+
 TEST(VulkanBootstrapTest, AcquireWaitStageCoversShaderReadsOfBackbuffer) {
     const vk::PipelineStageFlags mask = AcquireWaitStageMask();
-    EXPECT_EQ(mask, vk::PipelineStageFlagBits::eAllCommands);
+    EXPECT_TRUE(CoversStage(mask, vk::PipelineStageFlagBits::eVertexShader));
+    EXPECT_TRUE(CoversStage(mask, vk::PipelineStageFlagBits::eFragmentShader));
+    EXPECT_TRUE(CoversStage(mask, vk::PipelineStageFlagBits::eComputeShader));
     EXPECT_NE(mask, vk::PipelineStageFlags{vk::PipelineStageFlagBits::eColorAttachmentOutput});
 }
 
@@ -142,16 +161,20 @@ TEST(FrameSubmissionRecordTest, DroppedFramesNeverAdvanceTheRecord) {
 }
 
 TEST(FrameSubmissionRecordTest, InitializeResetsAndClampsFramesInFlight) {
+    // kMaxFramesInFlight is the engine's FIF cap (RunApplication clamps 1..4):
+    // the clamp must track the named constant, not a copied 4.
+    const std::uint32_t cap = FrameSubmissionRecord::kMaxFramesInFlight;
     FrameSubmissionRecord record{};
-    record.Initialize(4);
-    EXPECT_EQ(record.GetFramesInFlight(), 4u);
-    record.MarkSubmitted(3);
-    EXPECT_TRUE(record.IsRecorded(3));
+    record.Initialize(cap);
+    EXPECT_EQ(record.GetFramesInFlight(), cap);
+    record.MarkSubmitted(cap - 1);
+    EXPECT_TRUE(record.IsRecorded(cap - 1));
     record.Initialize(2);
     EXPECT_EQ(record.GetFramesInFlight(), 2u);
-    EXPECT_FALSE(record.IsRecorded(3)); // reset by the new Initialize
-    record.Initialize(9); // clamped to the engine FIF cap
-    EXPECT_EQ(record.GetFramesInFlight(), 4u);
+    EXPECT_FALSE(record.IsRecorded(cap - 1)); // reset by the new Initialize
+    // A value above the cap is clamped to it.
+    record.Initialize(cap + 5);
+    EXPECT_EQ(record.GetFramesInFlight(), cap);
 }
 
 }  // namespace

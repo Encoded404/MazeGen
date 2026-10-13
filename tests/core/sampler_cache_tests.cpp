@@ -98,15 +98,18 @@ TEST(SamplerNearestTest, ExactMatchHasZeroDistance) {
 }
 
 TEST(SamplerNearestTest, PicksTheClosestDistinctSampler) {
-    // Candidate 0 differs in address mode (weight 2); candidate 1 differs in
-    // anisotropy (weight 16), so candidate 0 is nearest.
+    // The two candidates are identical in every field except min_filter, so the
+    // outcome rests on that single field alone: the candidate whose filter
+    // equals the requested one has zero distance and must win, whatever the
+    // weights of the remaining fields are.
     SamplerDesc desired{};
+    desired.min_filter = vk::Filter::eNearest;
+    desired.address_u = vk::SamplerAddressMode::eClampToEdge;
     std::array<SamplerDesc, 2> candidates{};
     candidates[0] = desired;
-    candidates[0].address_u = vk::SamplerAddressMode::eClampToEdge;
     candidates[1] = desired;
-    candidates[1].anisotropy = true;
-    EXPECT_EQ(FindNearestSamplerIndex(candidates, desired), 0u);
+    candidates[0].min_filter = vk::Filter::eLinear;
+    EXPECT_EQ(FindNearestSamplerIndex(candidates, desired), 1u);
 }
 
 }  // namespace

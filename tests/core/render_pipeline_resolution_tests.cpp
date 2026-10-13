@@ -10,14 +10,16 @@ namespace {
 using namespace VulkanEngine::RenderGraph;
 
 // Builds a graph whose resources have mixed origins so the identity table can be
-// checked for positional-indexing regressions.
-CompiledRenderGraph BuildMixedGraph(ResourceHandle& imported_out, ResourceHandle& transient_out) {
+// checked for positional-indexing regressions. `imported_out` receives the four
+// imported handles in creation order (image, image, image, buffer).
+CompiledRenderGraph BuildMixedGraph(std::vector<ResourceHandle>& imported_out,
+                                    ResourceHandle& transient_out) {
     RenderGraphBuilder builder;
 
-    builder.ImportResource("engine-render-target", ResourceKind::Image);
-    builder.ImportResource("depth-buffer", ResourceKind::Image);
-    builder.ImportResource("missing-resolver", ResourceKind::Image);
-    const auto imported_buf = builder.ImportResource("scene-buffers", ResourceKind::Buffer);
+    imported_out.push_back(builder.ImportResource("engine-render-target", ResourceKind::Image));
+    imported_out.push_back(builder.ImportResource("depth-buffer", ResourceKind::Image));
+    imported_out.push_back(builder.ImportResource("missing-resolver", ResourceKind::Image));
+    imported_out.push_back(builder.ImportResource("scene-buffers", ResourceKind::Buffer));
 
     // A high-index transient: with positional/`size()`-as-count resolution this
     // is where the old code mis-resolved (defect #14).
@@ -30,15 +32,14 @@ CompiledRenderGraph BuildMixedGraph(ResourceHandle& imported_out, ResourceHandle
 
     const auto pass = builder.AddPass("main", QueueType::Graphics, true, {});
     builder.AddWrite(pass, high_transient);
-    builder.AddRead(pass, imported_buf, PipelineStageIntent::ComputeShader, AccessIntent::Read);
+    builder.AddRead(pass, imported_out.back(), PipelineStageIntent::ComputeShader, AccessIntent::Read);
 
-    imported_out = imported_buf;
     transient_out = high_transient;
     return builder.Compile();
 }
 
 TEST(RenderPipelineResolutionTest, TableKeysByResourceIndexNotPosition) {
-    ResourceHandle imported{};
+    std::vector<ResourceHandle> imported{};
     ResourceHandle transient_handle{};
     const auto graph = BuildMixedGraph(imported, transient_handle);
     ASSERT_TRUE(graph.success);
@@ -49,17 +50,49 @@ TEST(RenderPipelineResolutionTest, TableKeysByResourceIndexNotPosition) {
     const auto table = BuildResourceResolutionTable(graph, image_resolvers, buffer_resolvers);
     ASSERT_EQ(table.size(), graph.resource_lifetimes.size());
 
-    // Every entry is self-consistent: its resource_index matches its position
-    // (lifetimes are emitted in resource-index order) and never exceeds bounds.
-    for (std::uint32_t i = 0; i < table.size(); ++i) {
-        EXPECT_EQ(table[i].resource_index, i);
-        EXPECT_LT(table[i].resource_index, graph.resource_info.size());
+    // Every entry is self-consistent: it names a real resource and no two
+    // entries name the same one (the table covers each resource exactly once).
+    std::unordered_set<std::uint32_t> seen_indices{};
+    for (const auto& entry : table) {
+        EXPECT_LT(entry.resource_index, graph.resource_info.size());
+        EXPECT_TRUE(seen_indices.insert(entry.resource_index).second);
     }
 
-    EXPECT_EQ(table[imported.index].resolution, ResourceResolutionKind::ImportedBuffer);
-    EXPECT_EQ(table[transient_handle.index].resolution, ResourceResolutionKind::TransientImage);
-    EXPECT_EQ(table[2].resolution, ResourceResolutionKind::ImportedImageMissingResolver);
-    EXPECT_EQ(table[0].resolution, ResourceResolutionKind::ImportedImage);
+    // The table keys by resource index, not by table position: find each
+    // created resource's entry wherever it sits in the table and check that the
+    // entry resolves that exact resource. The emission order of
+    // `resource_lifetimes` is not part of the contract, so nothing below may
+    // index the table positionally.
+    const auto entry_of = [&table](ResourceHandle handle) -> const ResourceResolution* {
+        for (const auto& entry : table) {
+            if (entry.resource_index == handle.index) {
+                return &entry;
+            }
+        }
+        return nullptr;
+    };
+
+    // Indexed by BuildMixedGraph's creation order, not by any table position.
+    const std::vector<std::pair<const char*, ResourceResolutionKind>> imported_expectations{
+        {"engine-render-target", ResourceResolutionKind::ImportedImage},
+        {"depth-buffer", ResourceResolutionKind::ImportedImage},
+        {"missing-resolver", ResourceResolutionKind::ImportedImageMissingResolver},
+        {"scene-buffers", ResourceResolutionKind::ImportedBuffer},
+    };
+    ASSERT_EQ(imported.size(), imported_expectations.size());
+    for (std::size_t i = 0; i < imported.size(); ++i) {
+        const auto* entry = entry_of(imported[i]);
+        ASSERT_NE(entry, nullptr) << "no table entry for imported resource " << i;
+        EXPECT_EQ(entry->resource_index, imported[i].index);
+        EXPECT_EQ(entry->name, imported_expectations[i].first);
+        EXPECT_EQ(entry->resolution, imported_expectations[i].second);
+    }
+
+    const auto* transient_entry = entry_of(transient_handle);
+    ASSERT_NE(transient_entry, nullptr);
+    EXPECT_EQ(transient_entry->resource_index, transient_handle.index);
+    EXPECT_EQ(transient_entry->name, "late-transient");
+    EXPECT_EQ(transient_entry->resolution, ResourceResolutionKind::TransientImage);
 }
 
 TEST(RenderPipelineResolutionTest, RuntimeOldStateSeedsFirstBarrier) {

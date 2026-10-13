@@ -116,7 +116,10 @@ TEST(RenderGraphTest, CompiledGraphExecutesCallbacksInOrder) {
 // ImageLayoutIntent and back. Every intent the enum defines must round-trip
 // exactly; the defect this pins is a mapping that dropped or substituted a
 // layout (the old hand-written initial/final chains disagreed about
-// ShaderReadOnly, and the final chain turned it into Undefined).
+// ShaderReadOnly, and the final chain turned it into Undefined). The
+// static_assert ties kIntents to the engine's kImageLayoutIntentCount: a new
+// intent breaks the build here until its round-trip is tabled below, so the
+// completeness of this list can never silently fall behind the enum.
 TEST(RenderGraphTest, ImageLayoutIntentRoundTripsEveryIntent) {
     constexpr std::array kIntents{
         ImageLayoutIntent::Undefined,
@@ -129,6 +132,11 @@ TEST(RenderGraphTest, ImageLayoutIntentRoundTripsEveryIntent) {
         ImageLayoutIntent::Present,
         ImageLayoutIntent::DepthReadOnly,
     };
+
+    static_assert(kIntents.size() == kImageLayoutIntentCount,
+                  "a new ImageLayoutIntent enumerator landed without a "
+                  "round-trip entry in this test (and without updating "
+                  "kImageLayoutIntentCount)");
 
     for (const ImageLayoutIntent intent : kIntents) {
         EXPECT_EQ(ToImageLayoutIntent(IntentToImageLayout(intent)), intent)

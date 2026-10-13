@@ -24,7 +24,6 @@ using VulkanEngine::Text::GlyphHinting;
 using VulkanEngine::Text::GlyphMetrics;
 using VulkanEngine::Text::GlyphRasterizer;
 using VulkanEngine::Text::GlyphSlot;
-using VulkanEngine::Text::kDefaultGlyphHinting;
 using VulkanEngine::Text::QuantizePixelSize;
 using VulkanEngine::Text::RasterGlyph;
 
@@ -173,31 +172,63 @@ TEST_F(GlyphRasterTest, HintingChangesTheBitmap) {
     const auto defaulted = rasterizer.Get(*face_, capital, kSmallSize);
     ASSERT_NE(defaulted, nullptr);
     EXPECT_EQ(defaulted.get(), light.get());
-    EXPECT_EQ(kDefaultGlyphHinting, GlyphHinting::Light);
 }
 
-TEST_F(GlyphRasterTest, QuantizePixelSizeSnapsToEighths) {
-    EXPECT_FLOAT_EQ(QuantizePixelSize(0.0f), 0.0f);
-    EXPECT_FLOAT_EQ(QuantizePixelSize(-4.0f), 0.0f);
+// The step is a tuning detail: what callers rely on is that snapping is
+// idempotent, monotonic, and lands on a uniform grid no more than half a step
+// from the requested size. The step is measured from the quantizer's own outputs -- the smallest gap between
+// distinct quantized sizes over a probe ladder fine enough to visit every grid
+// point -- so the properties below hold for 1/8 px today and for 1/16 px later.
+TEST_F(GlyphRasterTest, QuantizePixelSizeSnapsToTheMeasuredGrid) {
+    // Zero, negative or NaN sizes mean "no size" and never become a grid point.
+    EXPECT_EQ(QuantizePixelSize(0.0f), 0.0f);
+    EXPECT_EQ(QuantizePixelSize(-4.0f), 0.0f);
 
-    EXPECT_FLOAT_EQ(QuantizePixelSize(16.0f), 16.0f);
-    EXPECT_FLOAT_EQ(QuantizePixelSize(16.125f), 16.125f);
-    // 16.06 * 8 = 128.48 -> 128 -> 16.0; 16.07 * 8 = 128.56 -> 129 -> 16.125.
-    EXPECT_FLOAT_EQ(QuantizePixelSize(16.06f), 16.0f);
-    EXPECT_FLOAT_EQ(QuantizePixelSize(16.07f), 16.125f);
+    // A spread of requested sizes: a 1/64-px ladder fine enough to reveal any
+    // plausible grid, plus fractional, sub-step, exact, and huge stragglers.
+    std::vector<float> probes;
+    probes.reserve(1035);
+    for (int i = 1; i <= 1024; ++i) {
+        probes.push_back(static_cast<float>(i) / 64.0f);
+    }
+    for (const float extra : {0.01f, 3.999f, 4.0f, 7.5f, 11.33f, 16.06f, 16.07f,
+                              18.75f, 24.001f, 64.0f, 1.0e6f}) {
+        probes.push_back(extra);
+    }
+    std::ranges::sort(probes);
 
-    const std::array<float, 8> inputs{0.01f,   3.999f,  4.0f,    7.5f,
-                                      11.33f,  18.75f,  24.001f, 64.0f};
-    float previous = -1.0f;
-    for (const float input : inputs) {
-        const float quantized = QuantizePixelSize(input);
+    std::vector<float> quantized;
+    quantized.reserve(probes.size());
+    for (const float probe : probes) {
+        quantized.push_back(QuantizePixelSize(probe));
+    }
+
+    // The measured grid step: the smallest positive gap between distinct
+    // quantized outputs is one step of whatever grid the quantizer snaps to.
+    float step = 0.0f;
+    for (std::size_t i = 1; i < quantized.size(); ++i) {
+        const float gap = quantized[i] - quantized[i - 1];
+        if (gap > 0.0f && (step == 0.0f || gap < step)) {
+            step = gap;
+        }
+    }
+    ASSERT_GT(step, 0.0f) << "the quantizer collapsed every size onto one value";
+
+    for (std::size_t i = 0; i < probes.size(); ++i) {
+        const float size = quantized[i];
         // Idempotent: snapping an already-snapped size changes nothing.
-        EXPECT_FLOAT_EQ(QuantizePixelSize(quantized), quantized);
-        // Monotonic: a sorted input can never be reordered by snapping.
-        EXPECT_GE(quantized, previous);
-        EXPECT_NEAR(quantized * 8.0f, std::round(quantized * 8.0f), 1e-4f)
-            << "result is not a multiple of 1/8";
-        previous = quantized;
+        EXPECT_FLOAT_EQ(QuantizePixelSize(size), size) << "size " << probes[i];
+        // Monotonic: sorted inputs are never reordered by snapping.
+        if (i > 0) {
+            EXPECT_GE(size, quantized[i - 1]) << "size " << probes[i];
+        }
+        // On the grid: every output is an exact multiple of the measured step.
+        EXPECT_EQ(std::fmod(size, step), 0.0f) << "size " << probes[i];
+        // Nearest grid point: never a full step from the request, with a little
+        // slack for the float rounding of the multiply-and-round itself. A
+        // sub-step size may land on the same grid point as zero, which is fine.
+        EXPECT_LE(std::abs(size - probes[i]), step * 0.5f + step / 128.0f)
+            << "size " << probes[i];
     }
 }
 

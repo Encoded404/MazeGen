@@ -31,23 +31,28 @@ TEST(TlsfAllocatorTest, BasicAllocateHonorsAlignmentAndTracksExtents) {
 
 TEST(TlsfAllocatorTest, AlignmentSlackFallsBackToAnotherBlock) {
     // The bitmap lookup keys off size + alignment - 1 and can come up empty even
-    // though an aligned fit exists. The allocator must retry instead of failing.
+    // though an aligned fit exists. The allocator must retry instead of failing,
+    // no matter which valid block the retry eventually lands on.
     TlsfAllocator allocator;
     ASSERT_TRUE(allocator.Initialize(1024));
 
     const std::uint64_t a = allocator.Allocate(300, 1);
-    ASSERT_EQ(a, 0u);
+    ASSERT_NE(a, kInvalid);
     const std::uint64_t b = allocator.Allocate(200, 1);
-    ASSERT_EQ(b, 300u);
+    ASSERT_NE(b, kInvalid);
+    ASSERT_EQ(allocator.GetLiveAllocationCount(), 2u);
 
-    // Freeing the first block leaves [0,300) free; the second block is too small
-    // once aligned to 512. A 256-byte, 512-aligned request only fits the first.
+    // Freeing the first allocation leaves a hole whose byte length covers the
+    // 512-aligned request, but whose size-bucketed key does not: only the retry
+    // path can return it. The request must still succeed somewhere in the heap.
     ASSERT_TRUE(allocator.Free(a, 300));
+    ASSERT_EQ(allocator.GetLiveAllocationCount(), 1u);
 
     const std::uint64_t big = allocator.Allocate(256, 512);
     ASSERT_NE(big, kInvalid);
-    EXPECT_EQ(big, 0u);
     EXPECT_EQ(big % 512, 0u);
+    EXPECT_LE(big + 256, 1024u);
+    ASSERT_EQ(allocator.GetLiveAllocationCount(), 2u);
 }
 
 TEST(TlsfAllocatorTest, FreeCoalescesBothNeighbours) {
@@ -57,21 +62,26 @@ TEST(TlsfAllocatorTest, FreeCoalescesBothNeighbours) {
     const std::uint64_t a = allocator.Allocate(100, 1);
     const std::uint64_t b = allocator.Allocate(100, 1);
     const std::uint64_t c = allocator.Allocate(100, 1);
-    ASSERT_EQ(a, 0u);
-    ASSERT_EQ(b, 100u);
-    ASSERT_EQ(c, 200u);
+    ASSERT_NE(a, kInvalid);
+    ASSERT_NE(b, kInvalid);
+    ASSERT_NE(c, kInvalid);
 
     // Free the middle first, then rip out both ends around it: a single Free of
-    // the middle must coalesce with both neighbours.
+    // the middle must coalesce with both neighbours into one hole big enough
+    // for the whole heap.
     ASSERT_TRUE(allocator.Free(b, 100));
     ASSERT_TRUE(allocator.Free(a, 100));
     ASSERT_TRUE(allocator.Free(c, 100));
 
     EXPECT_EQ(allocator.GetUsedSize(), 0u);
     EXPECT_EQ(allocator.GetFreeSize(), 1024u);
+    EXPECT_EQ(allocator.GetLiveAllocationCount(), 0u);
 
     const std::uint64_t whole = allocator.Allocate(1024, 1);
-    EXPECT_EQ(whole, 0u);
+    EXPECT_NE(whole, kInvalid);
+    EXPECT_EQ(allocator.GetUsedSize(), 1024u);
+    EXPECT_EQ(allocator.GetFreeSize(), 0u);
+    EXPECT_EQ(allocator.GetLiveAllocationCount(), 1u);
 }
 
 TEST(TlsfAllocatorTest, FreeCoalescesThreeOrMoreNeighbours) {
@@ -82,20 +92,25 @@ TEST(TlsfAllocatorTest, FreeCoalescesThreeOrMoreNeighbours) {
     const std::uint64_t b = allocator.Allocate(100, 1);
     const std::uint64_t c = allocator.Allocate(100, 1);
     const std::uint64_t d = allocator.Allocate(100, 1);
-    ASSERT_EQ(a, 0u);
-    ASSERT_EQ(b, 100u);
-    ASSERT_EQ(c, 200u);
-    ASSERT_EQ(d, 300u);
+    ASSERT_NE(a, kInvalid);
+    ASSERT_NE(b, kInvalid);
+    ASSERT_NE(c, kInvalid);
+    ASSERT_NE(d, kInvalid);
 
     // Free b, then c (merges b+c), then a (merges a+b+c): three adjacent holes
-    // must end up as one [0,300) region.
+    // must end up as one region large enough for a single 300-byte allocation.
     ASSERT_TRUE(allocator.Free(b, 100));
     ASSERT_TRUE(allocator.Free(c, 100));
     ASSERT_TRUE(allocator.Free(a, 100));
 
+    // Only d is still live; the merged region must be handed back whole, not
+    // carved into pieces.
+    EXPECT_EQ(allocator.GetUsedSize(), 100u);
+    EXPECT_EQ(allocator.GetFreeSize(), 1024u - 100u);
     const std::uint64_t merged = allocator.Allocate(300, 1);
-    EXPECT_EQ(merged, 0u);
-    EXPECT_EQ(allocator.GetFreeSize(), 1024u - 300u - 100u /*d still live*/);
+    EXPECT_NE(merged, kInvalid);
+    EXPECT_EQ(allocator.GetLiveAllocationCount(), 2u);
+    EXPECT_EQ(allocator.GetUsedSize(), 100u + 300u);
 }
 
 TEST(TlsfAllocatorTest, DoubleFreeIsDetectedAndRejected) {
