@@ -5,7 +5,7 @@ module VulkanEngine.PipelinePass;
 import std;
 import std.compat;
 
-import vulkan_hpp;
+import vulkan;
 
 import VulkanEngine.RenderGraph;
 import VulkanBackend.Vulkan.VulkanBootstrap;

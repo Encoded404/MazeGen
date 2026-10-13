@@ -10,7 +10,7 @@ import std.compat;
 
 import logiface;
 
-import vulkan_hpp;
+import vulkan;
 
 export import VulkanEngine.MaterialManager.MaterialId;
 export import VulkanEngine.BindlessManager.TextureSlot;

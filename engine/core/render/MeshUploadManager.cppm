@@ -10,7 +10,7 @@ export import VulkanEngine.Mesh.MeshTypes;
 
 import std;
 
-import vulkan_hpp;
+import vulkan;
 
 constexpr std::uint32_t UINT32_MAX =
     std::numeric_limits<std::uint32_t>::max();

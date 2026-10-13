@@ -6,7 +6,7 @@ export module VulkanBackend.ImGui;
 
 import std;
 
-import vulkan_hpp;
+import vulkan;
 
 
 export namespace VulkanBackend::ImGui {
@@ -32,8 +32,6 @@ public:
                                 vk::Format render_target_format, std::uint32_t width, std::uint32_t height) = 0;
     virtual void OnResize() = 0;
     virtual void OnSwapchainRecreated(std::uint32_t new_image_count, vk::Format new_format) = 0;
-
-    [[nodiscard]] virtual vk::DescriptorPool GetDescriptorPool() const = 0;
 };
 
 [[nodiscard]] std::shared_ptr<IImGuiBackend> CreateImGuiBackend();

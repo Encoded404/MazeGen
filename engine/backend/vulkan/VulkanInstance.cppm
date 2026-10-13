@@ -6,7 +6,7 @@ export module VulkanBackend.Vulkan.VulkanInstance;
 
 import std;
 
-import vulkan_hpp;
+import vulkan;
 
 import VulkanBackend.Vulkan.CommonTypes;
 import VulkanBackend.Vulkan.VulkanCapabilities;

@@ -8,7 +8,7 @@ import std;
 import std.compat;
 
 import logiface;
-import vulkan_hpp;
+import vulkan;
 
 import VulkanBackend.Vulkan.VulkanBootstrap;
 import VulkanEngine.ResourceSystem;

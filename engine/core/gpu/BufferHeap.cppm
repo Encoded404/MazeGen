@@ -6,7 +6,7 @@ export module VulkanEngine.GpuResources.DeviceBufferHeap;
 import std;
 import std.compat;
 
-import vulkan_hpp;
+import vulkan;
 
 export import VulkanBackend.Vulkan.VulkanBootstrap;
 export import VulkanEngine.GpuBuffer;

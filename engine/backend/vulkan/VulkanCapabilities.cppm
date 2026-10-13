@@ -4,7 +4,7 @@ export module VulkanBackend.Vulkan.VulkanCapabilities;
 
 import std;
 
-import vulkan_hpp;
+import vulkan;
 
 export namespace VulkanBackend::Vulkan {
 

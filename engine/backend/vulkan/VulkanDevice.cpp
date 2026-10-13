@@ -12,7 +12,7 @@ import std.compat;
 
 import logiface;
 
-import vulkan_hpp;
+import vulkan;
 
 import VulkanBackend.Vulkan.VulkanInstance;
 import VulkanBackend.Vulkan.CommonTypes;

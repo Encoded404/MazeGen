@@ -3,7 +3,7 @@ module;
 export module VulkanEngine.ShaderManager;
 
 import std;
-import vulkan_hpp;
+import vulkan;
 import ShaderReflection;
 import VulkanBackend.Vulkan.VulkanCapabilities;
 

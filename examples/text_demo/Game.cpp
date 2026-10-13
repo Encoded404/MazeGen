@@ -10,7 +10,7 @@ module Examples.TextDemo.Game;
 
 import std;
 
-import vulkan_hpp;
+import vulkan;
 
 import logiface;
 

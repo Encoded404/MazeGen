@@ -1,13 +1,12 @@
 module;
 
-#include <vulkan/vulkan.hpp>
-#include <vulkan/vulkan_core.h>
+#include <vulkan/vulkan.h>
 
 export module TestSupport.TextureRenderHarness;
 
 import std;
 
-import vulkan_hpp;
+import vulkan;
 
 import ShaderReflection;
 import VulkanBackend.Vulkan.VulkanCapabilities;

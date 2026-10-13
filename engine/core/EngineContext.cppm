@@ -3,7 +3,7 @@ module;
 export module VulkanEngine.EngineContext;
 
 import std;
-import vulkan_hpp;
+import vulkan;
 
 import VulkanEngine.ECS.ComponentRegistry;
 import VulkanEngine.BindlessManager;

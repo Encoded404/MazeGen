@@ -15,7 +15,7 @@ import std.compat;
 
 import logiface;
 
-import vulkan_hpp;
+import vulkan;
 
 namespace VulkanBackend::ImGui {
 
@@ -43,34 +43,27 @@ public:
             return false;
         }
 
-        std::array<vk::DescriptorPoolSize, 1> pool_sizes = {
-            vk::DescriptorPoolSize{vk::DescriptorType::eCombinedImageSampler, 16},
-        };
-
-        vk::DescriptorPoolCreateInfo pool_info{};
-        pool_info.flags = vk::DescriptorPoolCreateFlagBits::eFreeDescriptorSet;
-        pool_info.maxSets = 16;
-        pool_info.poolSizeCount = static_cast<std::uint32_t>(pool_sizes.size());
-        pool_info.pPoolSizes = pool_sizes.data();
-
-        descriptor_pool_ = std::make_unique<vk::DescriptorPool>(device.createDescriptorPool(pool_info));
-
+        // imgui_impl_vulkan 1.92.8+ allocates VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE
+        // sets (>= IMGUI_IMPL_VULKAN_MINIMUM_SAMPLED_IMAGE_POOL_SIZE per atlas)
+        // plus two internal sampler sets. Let the backend create its own pool,
+        // sized by the minimums it enforces, instead of hand-rolling one here.
         ImGui_ImplVulkan_InitInfo init_info = {};
         init_info.Instance = instance;
         init_info.PhysicalDevice = physical_device;
         init_info.Device = device;
         init_info.QueueFamily = queue_family;
         init_info.Queue = queue;
-        init_info.DescriptorPool = *descriptor_pool_;
+        init_info.DescriptorPool = VK_NULL_HANDLE;
+        init_info.DescriptorPoolSize = IMGUI_IMPL_VULKAN_MINIMUM_SAMPLED_IMAGE_POOL_SIZE;
         init_info.MinImageCount = config.image_count;
         init_info.ImageCount = config.image_count;
         init_info.UseDynamicRendering = true;
         init_info.ApiVersion = api_version;
-        init_info.MSAASamples = VK_SAMPLE_COUNT_1_BIT;
-        init_info.PipelineRenderingCreateInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO;
-        init_info.PipelineRenderingCreateInfo.colorAttachmentCount = 1;
+        init_info.PipelineInfoMain.MSAASamples = VK_SAMPLE_COUNT_1_BIT;
+        init_info.PipelineInfoMain.PipelineRenderingCreateInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO;
+        init_info.PipelineInfoMain.PipelineRenderingCreateInfo.colorAttachmentCount = 1;
         const vk::Format format = config.swapchain_format;
-        init_info.PipelineRenderingCreateInfo.pColorAttachmentFormats = reinterpret_cast<const VkFormat*>(&format);
+        init_info.PipelineInfoMain.PipelineRenderingCreateInfo.pColorAttachmentFormats = reinterpret_cast<const VkFormat*>(&format);
         init_info.CheckVkResultFn = [](VkResult err) {
             if (err < 0) {
                 LOGIFACE_LOG(warn, "An error occurred when initializing ImGui. Error code: " + std::to_string(static_cast<std::uint32_t>(err)));
@@ -90,10 +83,6 @@ public:
             ImGui_ImplVulkan_Shutdown();
             ImGui_ImplSDL3_Shutdown();
             ::ImGui::DestroyContext();
-            if (descriptor_pool_) {
-                device_.destroyDescriptorPool(*descriptor_pool_);
-                descriptor_pool_.reset();
-            }
             initialized_ = false;
         }
     }
@@ -144,14 +133,9 @@ public:
         ImGui_ImplVulkan_SetMinImageCount(config_.image_count);
     }
 
-    [[nodiscard]] vk::DescriptorPool GetDescriptorPool() const override {
-        return *descriptor_pool_;
-    }
-
 private:
     ImGuiBackendConfig config_{};
     vk::Device device_{};
-    std::unique_ptr<vk::DescriptorPool> descriptor_pool_{};
     bool initialized_ = false;
 };
 

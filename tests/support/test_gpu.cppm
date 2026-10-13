@@ -7,7 +7,7 @@ export module test_gpu;
 
 import std;
 
-import vulkan_hpp;
+import vulkan;
 
 export namespace TestSupport {
 

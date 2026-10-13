@@ -1,18 +1,3 @@
-# Overlay port (see vcpkg-overlays/ports/shader-slang in VulkanEngineV5).
-#
-# This is a copy of the upstream vcpkg shader-slang port with ONE addition at
-# the bottom of the file: after the CMake config fixup we generate a
-# slangTargets-debug.cmake that exports the release libraries (mirrored into
-# debug/lib by the upstream portfile) as the Debug configuration of the slang
-# targets. Without it, multi-config consumers link slang from lib/ in every
-# configuration while other libraries are linked from debug/lib in Debug
-# builds, which creates a cycle in CMake's runtime-search-path ordering and
-# triggers "Cannot generate a safe runtime search path" warnings.
-#
-# To refresh this overlay after an upstream port update: re-copy
-# ports/shader-slang/{portfile.cmake,vcpkg.json} from vcpkg and re-apply the
-# "generate debug targets export" block below.
-
 vcpkg_check_linkage(ONLY_DYNAMIC_LIBRARY)
 
 set(key NOTFOUND)
@@ -26,90 +11,90 @@ endif()
 
 set(ARCHIVE NOTFOUND)
 set(DEBUG_INFO_ARCHIVE NOTFOUND)
-# For convenient updates, use 
-# vcpkg install shader-slang --cmake-args=-DVCPKG_SHADER_SLANG_UPDATE=1
-if(key STREQUAL "windows-x64" OR VCPKG_SHADER_SLANG_UPDATE)
+# For convenient updates, update the version in vcpkg.json
+# and then run update_shas.py
+if(key STREQUAL "windows-x64")
 	vcpkg_download_distfile(
 		ARCHIVE
 		URLS "https://github.com/shader-slang/slang/releases/download/v${VERSION}/slang-${VERSION}-windows-x86_64.zip"
 		FILENAME "slang-${VERSION}-windows-x86_64.zip"
-		SHA512 6ca46a6e920596b2818d870663ea1c08c1ba0c40e600a6e6faf38784e3750f1a97d550f1c2b36fa0e2458166b9d128783cf0c413ecb6cd9cf98a675f3f92e33b
+		SHA512 cdd3329697a7307e0e46a03c45f279af9dd437cf842829f7dee579408959bd821982d9a486a4b01b865b19e67292c378ee962d340244c3062a3915b4f2cb967d
 	)
 	vcpkg_download_distfile(
 		DEBUG_INFO_ARCHIVE
 		URLS "https://github.com/shader-slang/slang/releases/download/v${VERSION}/slang-${VERSION}-windows-x86_64-debug-info.zip"
 		FILENAME "slang-${VERSION}-windows-x86_64-debug-info.zip"
-		SHA512 4e095c38a8ff054741f2e2857c4b989e0854100cb754af1b29d11203b23818863b4a34e85b2962df158e94b3de84d9534c982a995f8891b9888c532de469d4a5
+		SHA512 3ae219e7e967e3fb1fddd5bb15259b3093667b043f1d644abcfaa39f7d52e415ecd2a8dcfbb600041cc7d7454b8da092baea8c74858080fd18599123ed23c447
 	)
 endif()
-if(key STREQUAL "windows-arm64" OR VCPKG_SHADER_SLANG_UPDATE)
+if(key STREQUAL "windows-arm64")
 	vcpkg_download_distfile(
 		ARCHIVE
 		URLS "https://github.com/shader-slang/slang/releases/download/v${VERSION}/slang-${VERSION}-windows-aarch64.zip"
 		FILENAME "slang-${VERSION}-windows-aarch64.zip"
-		SHA512 37e9528c0d3ae2ae36ef94c5570523bec80f428a6953f3fa41ef13dabbecefd450017acb0e5d80e7ca98bdd973c79fb5ce87870a57c616e7b186b8c32e0c43ab
+		SHA512 bbfc7aea87a2f1409adab9a89080e29f487f12b2869e257318a09d10d02c1f0debcbe8681b5f20bf0a8334e80e9349380e387ef11f0f7eb9014f3fbaf67c2dd7
 	)
 	vcpkg_download_distfile(
 		DEBUG_INFO_ARCHIVE
 		URLS "https://github.com/shader-slang/slang/releases/download/v${VERSION}/slang-${VERSION}-windows-aarch64-debug-info.zip"
 		FILENAME "slang-${VERSION}-windows-aarch64-debug-info.zip"
-		SHA512 f3b9e09a9792b9a25ace3377df4c401ac5db46ef1fac0830bc511758457c803bc8ca72282383090ac80c97da1726f96ae48cedeee3909d168037260f730ce3ce
+		SHA512 94ba9a0245be873f4ef96c8d8cc15bf94578402a4c69d56ba8bd1d00cd9b070af5c49fa2be2b2d745c219ade8285ea8235aa7043c94df7d4e01ff4b95621d228
 	)
 endif()
-if(key STREQUAL "macosx-x64" OR VCPKG_SHADER_SLANG_UPDATE)
+if(key STREQUAL "macosx-x64")
 	vcpkg_download_distfile(
 		ARCHIVE
 		URLS "https://github.com/shader-slang/slang/releases/download/v${VERSION}/slang-${VERSION}-macos-x86_64.zip"
 		FILENAME "slang-${VERSION}-macos-x86_64.zip"
-		SHA512 da86dd57f9ec98060f26b1ad87d3b9b7cfd127bd44534a629f6eb3a429065e09b1c41f9b4b0b5fee0e9748e7fa1ed180539c208b9b9a3d4f2737447f59accc9a
+		SHA512 565656ef017ea84c164c1e1195d6a7f9e0a63731f6589c2b4eddb51b14b0ee071815c448d6f84451fa8e29b8c6d0e6a509f0eb7a59ef16b0216ce9c6d1049bc5
 	)
 	vcpkg_download_distfile(
 		DEBUG_INFO_ARCHIVE
 		URLS "https://github.com/shader-slang/slang/releases/download/v${VERSION}/slang-${VERSION}-macos-x86_64-debug-info.zip"
 		FILENAME "slang-${VERSION}-macos-x86_64-debug-info.zip"
-		SHA512 8d5c688405b9023d4985432eb44922d85fecc2b539c9bff198888219d89e6a606ada09659aab5d1f824b6efbbadd529d3d5de101e87b92114d32a478a45af3fb
+		SHA512 ac798bc3bcf7dc906944fba0d2ae122e651980c48f89461768ab91436470b9b8f0111c73ffd4e295607525065666218bac256347315d3fe6a191d9096f7794f6
 	)
 endif()
-if(key STREQUAL "macosx-arm64" OR VCPKG_SHADER_SLANG_UPDATE)
+if(key STREQUAL "macosx-arm64")
 	vcpkg_download_distfile(
 		ARCHIVE
 		URLS "https://github.com/shader-slang/slang/releases/download/v${VERSION}/slang-${VERSION}-macos-aarch64.zip"
 		FILENAME "slang-${VERSION}-macos-aarch64.zip"
-		SHA512 91c2c38fdb9dc387d2014bfb015bc3f2c09aaa7b9be734d852a4f41b82b42c98fcd8ee5241057a6000f708baa9fa91af691c4c963bd0fda7faf68032e877945a
+		SHA512 8b68493520bb0f42ffc9a269d1a28334b5e079b523558df9387ddf8d7e8268f0e1cfe4f5e4f6984d947bb6cbd5680d2663dc689c113ac890c141e87302b9dc0c
 	)
 	vcpkg_download_distfile(
 		DEBUG_INFO_ARCHIVE
 		URLS "https://github.com/shader-slang/slang/releases/download/v${VERSION}/slang-${VERSION}-macos-aarch64-debug-info.zip"
 		FILENAME "slang-${VERSION}-macos-aarch64-debug-info.zip"
-		SHA512 0c9125cd80e7f89403f72af4f0077d9c9d436421cc4256b50763180680ebfdfda127b7f8aeeb6659dd2a26a17cadce720a4a97f60ca756b5a98d4ee6ca5cd2b6
+		SHA512 a6ef253e2d6383d8385bebb48396d91af0ad28d659ba2c957e6bfa643ff81de2cd2a9cf0c2ab2216a3e8aadf2ec22519559598b68f626ada264edf1bd207b3c7
 	)
 endif()
-if(key STREQUAL "linux-x64" OR VCPKG_SHADER_SLANG_UPDATE)
+if(key STREQUAL "linux-x64")
 	vcpkg_download_distfile(
 		ARCHIVE
 		URLS "https://github.com/shader-slang/slang/releases/download/v${VERSION}/slang-${VERSION}-linux-x86_64.zip"
 		FILENAME "slang-${VERSION}-linux-x86_64.zip"
-		SHA512 d50ff36b1d94b07be38be0d16e8c6336b8dd254cb078e8582d715496e4d7c4bb5e3e53792bce9af1666f3ced0725a46ba89d123e4b6c5990237519a2b990d26a
+		SHA512 363dd468097822de6f140ecea99c7d15b1b262ce431cea3d5afed186c27055298681e4b2c46c9078e8f2bed0627a9a0e597694bad75e15e707833c9e4be516d1
 	)
 	vcpkg_download_distfile(
 		DEBUG_INFO_ARCHIVE
 		URLS "https://github.com/shader-slang/slang/releases/download/v${VERSION}/slang-${VERSION}-linux-x86_64-debug-info.zip"
 		FILENAME "slang-${VERSION}-linux-x86_64-debug-info.zip"
-		SHA512 339f0069db46d4c6912bacaf9966684fe3d6c38ece969c2565227b3d8a170ba7152005d029e0caf7b20e8f614ffe7d58108e41811db6840df4708e01edf936ec
+		SHA512 16de664d0e48e51c5d4d449edcaefc7767442275060cd6c8b1aed957554ceb37ab34bf52012783d0d7f7361906c7a57250caaae23f096dee886d1499336b862c
 	)
 endif()
-if(key STREQUAL "linux-arm64" OR VCPKG_SHADER_SLANG_UPDATE)
+if(key STREQUAL "linux-arm64")
 	vcpkg_download_distfile(
 		ARCHIVE
 		URLS "https://github.com/shader-slang/slang/releases/download/v${VERSION}/slang-${VERSION}-linux-aarch64.zip"
 		FILENAME "slang-${VERSION}-linux-aarch64.zip"
-		SHA512 d7cb2767342509248e50ad95fa4e01537abd6d63a10c4bc6005f049b0aa2fd315efd57d585c4e0343fa6fb893758d0e6715d2c2e41cc144d676c359ca758920b
+		SHA512 275563e15bd317aeb785efcbffad7898e1bee27681342ea5d591a13be1f23bdd6acf7bead2f7cb89dfdd91f8788c381f764d247e519863d88e61536bb531f40e
 	)
 	vcpkg_download_distfile(
 		DEBUG_INFO_ARCHIVE
 		URLS "https://github.com/shader-slang/slang/releases/download/v${VERSION}/slang-${VERSION}-linux-aarch64-debug-info.zip"
 		FILENAME "slang-${VERSION}-linux-aarch64-debug-info.zip"
-		SHA512 f9764a98b200c045bf2b8a3a32ad2cff677c4a33ce17729d4ea444e49663e8c1b988b95bd6427d3f726e32c1d910a3d4298b7f2b94d74f3460ce49817ce76422
+		SHA512 ba54fb78460cffe64b641cc2c67910fec4cb09f166f0da047d57eda68abb7a185c2dab397afe90b9c46051e72bb9779d69e22076e5503a9909335353f2856076
 	)
 endif()
 if(NOT ARCHIVE)
@@ -128,11 +113,6 @@ if(DEBUG_INFO_ARCHIVE)
 		ARCHIVE "${DEBUG_INFO_ARCHIVE}"
 		NO_REMOVE_ONE_LEVEL
 	)
-endif()
-
-if(VCPKG_SHADER_SLANG_UPDATE)
-	message(STATUS "All downloads are up-to-date.")
-	message(FATAL_ERROR "Stopping due to VCPKG_SHADER_SLANG_UPDATE being enabled.")
 endif()
 
 file(GLOB libs
@@ -172,6 +152,22 @@ if(NOT VCPKG_TARGET_IS_WINDOWS AND DEBUG_INFO_PATH)
   endif()
 endif()
 
+# The precompiled standard modules are looked up next to the slang runtime library
+file(GLOB standard_modules
+  "${BINDIST_PATH}/bin/slang-standard-module-*"
+  "${BINDIST_PATH}/lib/slang-standard-module-*"
+)
+if(NOT standard_modules)
+  message(FATAL_ERROR "No slang-standard-module-* directory found in the upstream archive.")
+endif()
+file(GLOB api_modules "${BINDIST_PATH}/bin/*.slang") # slang.slang and gfx.slang, the host API bindings
+list(APPEND standard_modules ${api_modules})
+if(VCPKG_TARGET_IS_WINDOWS)
+  file(COPY ${standard_modules} DESTINATION "${CURRENT_PACKAGES_DIR}/bin")
+else()
+  file(COPY ${standard_modules} DESTINATION "${CURRENT_PACKAGES_DIR}/lib")
+endif()
+
 if(NOT VCPKG_BUILD_TYPE)
   file(INSTALL "${CURRENT_PACKAGES_DIR}/lib" DESTINATION "${CURRENT_PACKAGES_DIR}/debug")
   if(VCPKG_TARGET_IS_WINDOWS)
@@ -180,7 +176,7 @@ if(NOT VCPKG_BUILD_TYPE)
 endif()
 
 # On macos, slang has signed their binaries
-# vcpkg wants to be helpful and update the rpath as it moves binaries around but this 
+# vcpkg wants to be helpful and update the rpath as it moves binaries around but this
 # breaks the code signature and makes the binaries useless
 # Removing the signature is rude so instead we will disable rpath fixup
 if(VCPKG_TARGET_IS_OSX OR VCPKG_TARGET_IS_IOS)
@@ -189,6 +185,7 @@ endif()
 
 # Must manually copy some tool dependencies since vcpkg can't copy them automagically for us
 file(INSTALL ${dyn_libs} DESTINATION "${CURRENT_PACKAGES_DIR}/tools/shader-slang")
+file(COPY ${standard_modules} DESTINATION "${CURRENT_PACKAGES_DIR}/tools/shader-slang")
 vcpkg_copy_tools(TOOL_NAMES slangc slangd slangi slang SEARCH_DIR "${BINDIST_PATH}/bin")
 
 file(GLOB headers "${BINDIST_PATH}/include/*.h")
@@ -211,10 +208,9 @@ block(SCOPE_FOR VARIABLES)
 	)
 	vcpkg_replace_string("${CURRENT_PACKAGES_DIR}/share/slang/slangConfigVersion.cmake"
 		[[if("${CMAKE_SIZEOF_VOID_P}" STREQUAL ""]]
-		[[if(#[=[ host tool ]=] "TRUE"]] 
+		[[if(#[=[ host tool ]=] "TRUE"]]
 	)
 endblock()
-
 # ---- Generate a Debug export for the installed (release) libraries ----
 #
 # shader-slang builds no debug binaries (VCPKG_BUILD_TYPE Release above), but
@@ -243,21 +239,33 @@ if(EXISTS "${CURRENT_PACKAGES_DIR}/share/slang/slangTargets-release.cmake")
 	file(WRITE "${CURRENT_PACKAGES_DIR}/share/slang/slangTargets-debug.cmake" "${_slang_debug_targets}")
 endif()
 
+
+file(INSTALL "${CMAKE_CURRENT_LIST_DIR}/usage" DESTINATION "${CURRENT_PACKAGES_DIR}/share/${PORT}")
+
 vcpkg_install_copyright(
-	FILE_LIST "${BINDIST_PATH}/LICENSE"
+	FILE_LIST
+		"${BINDIST_PATH}/LICENSE"
+		"${BINDIST_PATH}/LICENSES/Apache-2.0.txt"
+		"${BINDIST_PATH}/LICENSES/BSL-1.0.txt"
+		"${BINDIST_PATH}/LICENSES/CC-BY-4.0.txt"
+		"${BINDIST_PATH}/LICENSES/LicenseRef-UOI-NCSA.txt"
+		"${BINDIST_PATH}/LICENSES/LLVM-exception.txt"
+		"${BINDIST_PATH}/LICENSES/MIT.txt"
+		"${BINDIST_PATH}/LICENSES/Unlicense.txt"
 	COMMENT #[[ from README ]] [[
 The Slang code itself is under the Apache 2.0 with LLVM Exception license.
 
 Builds of the core Slang tools depend on the following projects, either automatically or optionally, which may have their own licenses:
 
+* [`ankerl::unordered_dense::{map, set}`](https://github.com/martinus/unordered_dense) (MIT)
+* [`fast_float`](https://github.com/fastfloat/fast_float) (Apache 2.0 / MIT / Boost)
 * [`glslang`](https://github.com/KhronosGroup/glslang) (BSD)
 * [`lz4`](https://github.com/lz4/lz4) (BSD)
 * [`miniz`](https://github.com/richgel999/miniz) (MIT)
 * [`spirv-headers`](https://github.com/KhronosGroup/SPIRV-Headers) (Modified MIT)
 * [`spirv-tools`](https://github.com/KhronosGroup/SPIRV-Tools) (Apache 2.0)
-* [`ankerl::unordered_dense::{map, set}`](https://github.com/martinus/unordered_dense) (MIT)
 
-Slang releases may include [slang-llvm](https://github.com/shader-slang/slang-llvm) which includes [LLVM](https://github.com/llvm/llvm-project) under the license:
+Slang releases may include [LLVM](https://github.com/llvm/llvm-project) under the license:
 
 * [`llvm`](https://llvm.org/docs/DeveloperPolicy.html#new-llvm-project-license-framework) (Apache 2.0 License with LLVM exceptions)
 ]])

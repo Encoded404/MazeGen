@@ -4,7 +4,7 @@ export module test_vulkan_fakes;
 
 import std;
 
-import vulkan_hpp;
+import vulkan;
 import VulkanBackend.Vulkan.VulkanBootstrap;
 import VulkanShared.RenderGraphTypes;
 

@@ -8,7 +8,7 @@ import std;
 
 import logiface;
 
-import vulkan_hpp;
+import vulkan;
 
 namespace VulkanBackend::Vulkan {
 

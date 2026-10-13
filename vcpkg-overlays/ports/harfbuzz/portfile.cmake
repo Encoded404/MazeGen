@@ -1,35 +1,29 @@
 # Overlay port (see vcpkg-overlays/ports/harfbuzz in VulkanEngineV5).
 #
-# This is a copy of the upstream vcpkg harfbuzz port at version 14.3.0 with ONE
-# local addition, at the end of harfbuzzConfig.cmake.in: an imported
-# harfbuzz::harfbuzz-gpu target. The portfile itself is unmodified.
+# This is a verbatim copy of the upstream vcpkg harfbuzz port (now at version
+# 14.5.1) plus a local addition appended at the end of harfbuzzConfig.cmake.in.
 #
-# Why the version bump: the engine's GPU glyph backend uses hb-gpu
-# (libharfbuzz-gpu), the GPU rasterizer that implements the Slug algorithm.
-# hb-gpu was introduced in HarfBuzz 14.0.0 and is absent from 11.3.3, the
-# version the pinned registry baseline resolves to. Raising one port keeps every
-# other dependency at the baseline the rest of the engine is tested against,
-# which a global baseline bump would not.
+# Why the overlay: the engine's GPU glyph backend uses hb-gpu (libharfbuzz-gpu),
+# the GPU rasterizer implementing the Slug algorithm. hb-gpu was introduced in
+# HarfBuzz 14.0.0. Upstream still builds libharfbuzz-gpu as a separate library
+# and the hb_gpu_* symbols exist only in that archive - libharfbuzz.a defines
+# none of them. Upstream's harfbuzzConfig.cmake.in (still, as of 14.5.1) exports
+# only core and subset, so without the addition a consumer can include hb-gpu.h
+# but cannot link it.
 #
-# Why the config addition: HarfBuzz 14 builds libharfbuzz-gpu as a SEPARATE
-# library and the hb_gpu_* symbols exist only in that archive — libharfbuzz.a
-# defines none of them. Upstream's config exports only core and subset, so
-# without the addition a consumer can include hb-gpu.h but cannot link it.
-#
-# To retire this overlay: move the registry baseline in
-# vcpkg-configuration.json past a commit whose harfbuzz port is >= 14.0.0 AND
-# whose harfbuzzConfig.cmake.in exports the gpu target, then delete this
-# directory and re-copy ports/harfbuzz from vcpkg if a newer version is wanted.
-# To refresh it: re-copy
-# ports/harfbuzz/{portfile.cmake,vcpkg.json,harfbuzzConfig.cmake.in,
-# no-threads-on-emscripten.patch} from a vcpkg checkout at the desired version
-# and re-append the "LOCAL ADDITION" block at the end of the config.
+# To retire this overlay: move the registry baseline in vcpkg-configuration.json
+# past a commit whose harfbuzz port exports the gpu target in
+# harfbuzzConfig.cmake.in (>= 14.0.0), then delete this directory. Check with
+# https://raw.githubusercontent.com/microsoft/vcpkg/master/ports/harfbuzz/harfbuzzConfig.cmake.in
+# To refresh it: re-copy ports/harfbuzz/* from a vcpkg checkout at the desired
+# version and re-append the "LOCAL ADDITION" block at the end of the config.
+
 
 vcpkg_from_github(
     OUT_SOURCE_PATH SOURCE_PATH
     REPO harfbuzz/harfbuzz
-    REF ${VERSION}
-    SHA512 f45dc18c5c0e3a6f67eaa7e87548dc30d7d7b2582f72f8e7f5ad486149414774979e332fd02122a1b6dd146532812d672b287029c637e0e411db072d7f73afb9
+    REF "${VERSION}"
+    SHA512 18cd352c3879c8b44f150c9a3171f3790c3c641e161ae1f5591c8156cf8c551aa45c7873cb6ddc9138e2fdc6c331d6812c21e6a210eb1385dd2813a738317593
     HEAD_REF master
     PATCHES
         ${ANDROID_LOCALECONV_L_PATCH}

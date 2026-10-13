@@ -14,7 +14,7 @@ import std.compat;
 
 import logiface;
 
-import vulkan_hpp;
+import vulkan;
 
 import VulkanShared.ScopedSection;
 

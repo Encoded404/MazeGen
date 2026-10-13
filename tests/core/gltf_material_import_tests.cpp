@@ -7,7 +7,7 @@
 
 import std;
 
-import vulkan_hpp;
+import vulkan;
 
 import VulkanEngine.TextureTypes;
 import VulkanEngine.FileLoaders.Mesh.GltfMaterialImport;

@@ -9,7 +9,7 @@ import std;
 import std.compat;
 import logiface;
 
-import vulkan_hpp;
+import vulkan;
 
 import VulkanEngine.MeshManager;
 import VulkanEngine.Components.DynamicMesh;

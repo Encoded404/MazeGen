@@ -3,7 +3,7 @@ module;
 export module VulkanEngine.PipelineFactory;
 
 import std;
-import vulkan_hpp;
+import vulkan;
 import ShaderReflection;
 import VulkanEngine.ShaderManager;
 import VulkanEngine.GplPolicy;

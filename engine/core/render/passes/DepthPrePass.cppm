@@ -3,7 +3,7 @@ module;
 export module VulkanEngine.Render.Passes.DepthPrePass;
 
 import std;
-import vulkan_hpp;
+import vulkan;
 import VulkanEngine.PipelinePass;
 import VulkanEngine.SceneRenderer;
 

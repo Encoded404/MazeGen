@@ -6,7 +6,7 @@
 
 import std;
 
-import vulkan_hpp;
+import vulkan;
 import FileLoader.Types;
 import VulkanEngine.TextureTypes;
 import VulkanEngine.TextureFormat;

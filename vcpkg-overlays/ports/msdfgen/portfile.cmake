@@ -1,7 +1,7 @@
 # Overlay port (see vcpkg-overlays/ports/msdfgen in VulkanEngineV5).
 #
-# This is the upstream vcpkg msdfgen port with ONE addition: the linkage check
-# below. The rest is verbatim.
+# Upstream vcpkg msdfgen port with ONE addition: the linkage check below. The
+# rest is verbatim from upstream at 1.13+new-skia-api.
 #
 # Why: upstream does not pin the linkage, so on a dynamic triplet (x64-mingw-
 # libcxx) msdfgen is built as a DLL. That DLL exports nothing -- its import
@@ -19,13 +19,14 @@
 # To retire this overlay: move the registry baseline past a msdfgen port that
 # pins the linkage itself (or that fixes the exports), then delete this
 # directory.
+
 vcpkg_check_linkage(ONLY_STATIC_LIBRARY)
 
 vcpkg_from_github(
     OUT_SOURCE_PATH SOURCE_PATH
     REPO Chlumsky/msdfgen
     REF "v${VERSION}"
-    SHA512 ad02b8b18b4c3329d1c3e9468dedb6ea45b1691817a970f84c4c6dbfd47e2b3483710810256a2714dece6f000931125fdef9fc6bad12f40667a623f7a5f06c9a
+    SHA512 5a136996de6ae013d223cd246548613d2928adcd6c3357333447086817351816c1b49e3eb119f3fe299745a50684d312db9410adf7671120b9e38fee8b96ff29
     HEAD_REF master
 )
 

@@ -8,7 +8,7 @@ import std;
 
 import logiface;
 
-import vulkan_hpp;
+import vulkan;
 
 import VulkanBackend.Vulkan.VulkanInstance;
 import VulkanBackend.Vulkan.VulkanDevice;

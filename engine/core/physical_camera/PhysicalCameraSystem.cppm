@@ -4,7 +4,7 @@ export module VulkanEngine.PhysicalCameraSystem;
 
 import std;
 
-import vulkan_hpp;
+import vulkan;
 
 export import VulkanEngine.PhysicalCameraTypes;
 import VulkanBackend.Vulkan.VulkanBootstrap;

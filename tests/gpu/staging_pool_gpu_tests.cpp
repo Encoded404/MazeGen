@@ -2,7 +2,7 @@
 
 import std;
 
-import vulkan_hpp;
+import vulkan;
 import test_gpu;
 import TestSupport.HeadlessVulkanBackend;
 import VulkanEngine.GpuResources.StagingPool;

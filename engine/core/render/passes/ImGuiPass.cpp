@@ -6,7 +6,7 @@ module VulkanEngine.Render.Passes.ImGuiPass;
 
 import std;
 import logiface;
-import vulkan_hpp;
+import vulkan;
 import VulkanEngine.PipelinePass;
 import VulkanBackend.Vulkan.VulkanBootstrap;
 import VulkanEngine.ImGui;

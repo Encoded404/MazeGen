@@ -9,7 +9,7 @@ import std.compat;
 
 import logiface;
 
-import vulkan_hpp;
+import vulkan;
 
 using VulkanEngine::RenderGraph::ResourceHandle;
 using ReadInfo = VulkanEngine::RenderGraph::RenderGraphBuilder::ReadInfo;

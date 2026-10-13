@@ -4,7 +4,7 @@ export module VulkanBackend.Vulkan.VulkanSwapchain;
 
 import std;
 
-import vulkan_hpp;
+import vulkan;
 
 import VulkanBackend.Vulkan.CommonTypes;
 import VulkanBackend.Vulkan.VulkanDevice;

@@ -5,7 +5,7 @@ export module VulkanEngine.TextureUploader;
 import std;
 import std.compat;
 
-import vulkan_hpp;
+import vulkan;
 
 export import VulkanBackend.Vulkan.VulkanBootstrap;
 export import VulkanBackend.Vulkan.VulkanCapabilities;

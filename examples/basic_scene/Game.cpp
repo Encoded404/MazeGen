@@ -13,7 +13,7 @@ module Examples.BasicScene.Game;
 
 import std;
 
-import vulkan_hpp;
+import vulkan;
 
 import logiface;
 

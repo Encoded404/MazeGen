@@ -4,7 +4,7 @@ export module VulkanEngine.ImGui;
 
 import std;
 
-import vulkan_hpp;
+import vulkan;
 
 export import VulkanBackend.ImGui;
 import VulkanShared.CallbackList;

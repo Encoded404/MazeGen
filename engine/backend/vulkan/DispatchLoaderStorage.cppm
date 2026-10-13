@@ -4,4 +4,4 @@ module;
 
 export module VulkanBackend.Vulkan.VulkanDispatchLoaderStorage;
 
-import vulkan_hpp;
+import vulkan;

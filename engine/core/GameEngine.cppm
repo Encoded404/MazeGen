@@ -4,7 +4,7 @@ export module VulkanEngine.GameEngine;
 
 import std;
 
-import vulkan_hpp;
+import vulkan;
 
 export import VulkanEngine.Renderer;
 export import VulkanEngine.SceneLoader;

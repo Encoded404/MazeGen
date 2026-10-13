@@ -5,7 +5,7 @@ export module VulkanEngine.DescriptorDecl;
 import std;
 import std.compat;
 
-import vulkan_hpp;
+import vulkan;
 
 export namespace VulkanEngine::Render {
 

@@ -6,7 +6,7 @@ module VulkanEngine.TechniqueManager;
 import std;
 import std.compat;
 
-import vulkan_hpp;
+import vulkan;
 
 import VulkanEngine.ShaderManager;
 import VulkanEngine.PipelineFactory;

@@ -11,7 +11,7 @@ import std.compat;
 
 import logiface;
 
-import vulkan_hpp;
+import vulkan;
 
 import VulkanEngine.ECS.ComponentRegistry;
 import VulkanBackend.Vulkan.VulkanBootstrap;

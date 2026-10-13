@@ -6,7 +6,7 @@ export module VulkanEngine.TechniqueManager.UnlitTextureTechnique;
 
 import std;
 
-import vulkan_hpp;
+import vulkan;
 
 import VulkanEngine.TechniqueManager.BaseTechnique;
 import VulkanEngine.TechniqueManager.DefaultMeshTechnique;

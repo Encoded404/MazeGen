@@ -8,7 +8,7 @@ import std;
 
 import logiface;
 
-import vulkan_hpp;
+import vulkan;
 
 import VulkanEngine.RenderGraph;
 import VulkanBackend.Vulkan.RenderGraphExecutor;

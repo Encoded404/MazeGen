@@ -5,7 +5,7 @@ module VulkanEngine.DefaultTextureFactory;
 import std;
 import std.compat;
 
-import vulkan_hpp;
+import vulkan;
 
 import VulkanEngine.ResourceSystem;
 import VulkanEngine.ResourceSystem.TextureResource;

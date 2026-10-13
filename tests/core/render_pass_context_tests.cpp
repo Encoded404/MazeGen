@@ -4,7 +4,7 @@
 
 import std;
 
-import vulkan_hpp;
+import vulkan;
 
 import VulkanEngine.RenderPipeline;
 

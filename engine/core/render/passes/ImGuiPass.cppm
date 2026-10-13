@@ -3,7 +3,7 @@ module;
 export module VulkanEngine.Render.Passes.ImGuiPass;
 
 import std;
-import vulkan_hpp;
+import vulkan;
 import VulkanEngine.PipelinePass;
 import VulkanBackend.Vulkan.VulkanBootstrap;
 

@@ -1,7 +1,7 @@
 module;
 export module VulkanShared.RenderGraphTypes;
 import std;
-import vulkan_hpp;
+import vulkan;
 
 export namespace VulkanEngine::RenderGraph {
 

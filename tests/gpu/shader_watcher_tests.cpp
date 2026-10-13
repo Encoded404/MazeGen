@@ -2,7 +2,7 @@
 
 import std;
 
-import vulkan_hpp;
+import vulkan;
 
 import ShaderReflection;
 import VulkanBackend.Vulkan.VulkanBootstrap;

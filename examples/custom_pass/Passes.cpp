@@ -3,7 +3,7 @@ module;
 module Examples.CustomPass.Passes;
 
 import std;
-import vulkan_hpp;
+import vulkan;
 import VulkanEngine.PipelinePass;
 
 namespace Examples::CustomPass {

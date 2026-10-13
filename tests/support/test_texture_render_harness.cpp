@@ -1,7 +1,6 @@
 module;
 
-#include <vulkan/vulkan.hpp>
-#include <vulkan/vulkan_core.h>
+#include <vulkan/vulkan.h>
 
 #include <logging/logging_macros.hpp>
 
@@ -11,7 +10,7 @@ import std;
 
 import logiface;
 
-import vulkan_hpp;
+import vulkan;
 
 import ShaderReflection;
 import VulkanBackend.Vulkan.VulkanBootstrap;

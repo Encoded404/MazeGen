@@ -23,10 +23,12 @@ namespace {
     return hash;
 }
 
-// HarfBuzz 14.3.0, HB_GPU_SHADER_LANG_HLSL. These are version-pinned facts, not
-// definitions of correctness: they are the source the committed port was made
-// from, and a HarfBuzz bump that changes them means the port must be redone.
-constexpr std::uint64_t kSharedFragmentSourceHash = 0xD861285F4FEA9E6FULL;
+// HarfBuzz, HB_GPU_SHADER_LANG_HLSL (shared fragment re-pinned at 14.5.1 for
+// the leftward-ray sign fix ported into slug_gpu.slang). These are
+// version-pinned facts, not definitions of correctness: they are the source
+// the committed port was made from, and a HarfBuzz bump that changes them
+// means the port must be redone.
+constexpr std::uint64_t kSharedFragmentSourceHash = 0x6A77F5F58F201D7ULL;
 constexpr std::uint64_t kSharedVertexSourceHash = 0xDF0141F02DE42987ULL;
 constexpr std::uint64_t kDrawFragmentSourceHash = 0x5F5C67FCD6627ECBULL;
 

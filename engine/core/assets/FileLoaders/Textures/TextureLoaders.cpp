@@ -11,7 +11,7 @@ import FileLoader.Types;
 
 import std;
 
-import vulkan_hpp;
+import vulkan;
 
 import VulkanEngine.TextureTypes;
 

@@ -4,7 +4,7 @@ export module VulkanBackend.Vulkan.VulkanDevice;
 
 import std;
 
-import vulkan_hpp;
+import vulkan;
 
 import VulkanBackend.Vulkan.VulkanInstance;
 import VulkanBackend.Vulkan.CommonTypes;

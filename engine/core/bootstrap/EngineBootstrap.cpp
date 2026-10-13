@@ -7,7 +7,7 @@ module VulkanEngine.EngineBootstrap;
 import std;
 import std.compat;
 import logiface;
-import vulkan_hpp;
+import vulkan;
 
 import VulkanShared.ScopedSection;
 import VulkanShared.Teardown;

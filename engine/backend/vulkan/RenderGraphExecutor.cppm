@@ -4,7 +4,7 @@ export module VulkanBackend.Vulkan.RenderGraphExecutor;
 
 import std;
 
-import vulkan_hpp;
+import vulkan;
 
 import VulkanShared.RenderGraphTypes;
 

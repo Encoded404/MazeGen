@@ -5,7 +5,7 @@ export module VulkanBackend.Vulkan.VulkanDebugUtils;
 import std;
 import std.compat;
 
-import vulkan_hpp;
+import vulkan;
 
 // Global gate: set once during instance init (VulkanInstance::Initialize) to
 // whether VK_EXT_debug_utils was enabled at instance AND device creation.

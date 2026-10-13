@@ -278,7 +278,11 @@ if( NOT TARGET Vulkan::HppModule )
 	target_include_directories( Vulkan-HppModule PUBLIC ${Vulkan_INCLUDE_DIR} )
 endif()
 
-target_compile_definitions( Vulkan-HppModule PUBLIC VULKAN_HPP_DISPATCH_LOADER_DYNAMIC )
+target_compile_definitions( Vulkan-HppModule PUBLIC
+	VULKAN_HPP_DISPATCH_LOADER_DYNAMIC
+	# Silence the "experimental named module" warning inside vulkan.cppm (new
+	# headers, >= 1.4.363); the module is used deliberately here.
+	VULKAN_HPP_CXX_MODULE_EXPERIMENTAL_WARNING=1 )
 
 # Enable CTest at the top level so `ctest` discovers tests
 include(CTest)

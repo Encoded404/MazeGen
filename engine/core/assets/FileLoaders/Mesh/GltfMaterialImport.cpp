@@ -4,7 +4,7 @@ module VulkanEngine.FileLoaders.Mesh.GltfMaterialImport;
 
 import std;
 
-import vulkan_hpp;
+import vulkan;
 import fastgltf;
 
 import VulkanEngine.TextureTypes;

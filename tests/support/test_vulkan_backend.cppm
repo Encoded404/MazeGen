@@ -5,7 +5,7 @@ export module TestSupport.HeadlessVulkanBackend;
 import std;
 import std.compat;
 
-import vulkan_hpp;
+import vulkan;
 
 import VulkanBackend.Vulkan.VulkanBootstrap;
 import VulkanBackend.Vulkan.VulkanCapabilities;

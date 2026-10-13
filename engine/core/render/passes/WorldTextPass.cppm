@@ -9,7 +9,7 @@ export module VulkanEngine.Render.Passes.WorldTextPass;
 import std;
 import std.compat;
 
-import vulkan_hpp;
+import vulkan;
 
 import VulkanBackend.Vulkan.VulkanBootstrap;
 import VulkanEngine.GpuBuffer;

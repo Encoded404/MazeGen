@@ -5,7 +5,7 @@ export module VulkanEngine.GpuResources.TransientAllocator;
 import std;
 import std.compat;
 
-import vulkan_hpp;
+import vulkan;
 
 export import VulkanBackend.Vulkan.VulkanBootstrap;
 

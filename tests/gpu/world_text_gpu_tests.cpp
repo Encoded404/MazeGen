@@ -6,7 +6,7 @@
 import std;
 import std.compat;
 
-import vulkan_hpp;
+import vulkan;
 
 import test_gpu;
 

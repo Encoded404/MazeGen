@@ -7,7 +7,7 @@ module VulkanEngine.Render.Passes.MainPass;
 
 import std;
 import logiface;
-import vulkan_hpp;
+import vulkan;
 import VulkanEngine.PipelinePass;
 import VulkanEngine.SceneRenderer;
 

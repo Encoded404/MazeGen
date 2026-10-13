@@ -6,7 +6,7 @@ export module VulkanEngine.TextureTypes;
 
 import std;
 
-import vulkan_hpp;
+import vulkan;
 
 export namespace VulkanEngine::Textures {
 

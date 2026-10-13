@@ -4,7 +4,7 @@ module VulkanBackend.Vulkan.PipelineUtils;
 
 import std;
 
-import vulkan_hpp;
+import vulkan;
 
 namespace VulkanBackend::Vulkan {
 

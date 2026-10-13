@@ -2,7 +2,7 @@
 
 import std;
 
-import vulkan_hpp;
+import vulkan;
 import VulkanBackend.Vulkan.FormatUtils;
 import VulkanBackend.Vulkan.ImageUtils;
 

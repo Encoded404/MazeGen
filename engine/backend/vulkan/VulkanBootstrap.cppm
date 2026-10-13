@@ -4,7 +4,7 @@ export module VulkanBackend.Vulkan.VulkanBootstrap;
 
 import std;
 
-import vulkan_hpp;
+import vulkan;
 
 export import VulkanBackend.Vulkan.CommonTypes;
 export import VulkanBackend.Vulkan.VulkanCapabilities;

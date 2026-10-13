@@ -6,7 +6,7 @@ export module VulkanEngine.SceneRenderer;
 import std;
 import std.compat;
 
-import vulkan_hpp;
+import vulkan;
 
 export import VulkanEngine.ECS.ComponentRegistry;
 export import VulkanBackend.Vulkan.VulkanBootstrap;

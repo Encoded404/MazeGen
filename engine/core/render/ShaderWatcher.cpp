@@ -27,7 +27,7 @@ struct WatcherListener final : efsw::FileWatchListener {
 
     void handleFileAction(efsw::WatchID /*watchid*/, const std::string& /*dir*/,
                           const std::string& filename, efsw::Action action,
-                          std::string /*oldFilename*/) override {
+                          const std::string& /*oldFilename*/) override {
         if (action != efsw::Actions::Modified && action != efsw::Actions::Add) return;
         if (!filename.ends_with(".slang")) return; // ignore temp-file artifacts
         owner.OnFileChanged(filename);

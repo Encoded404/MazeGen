@@ -5,7 +5,7 @@ export module VulkanEngine.RenderPipeline;
 import std;
 import std.compat;
 
-import vulkan_hpp;
+import vulkan;
 
 export import VulkanEngine.RenderGraph;
 export import VulkanBackend.Vulkan.VulkanBootstrap;

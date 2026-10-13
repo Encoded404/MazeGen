@@ -5,7 +5,7 @@ export module VulkanBackend.Vulkan.PipelineUtils;
 import std;
 import std.compat;
 
-import vulkan_hpp;
+import vulkan;
 
 export namespace VulkanBackend::Vulkan {
 

@@ -7,7 +7,7 @@ import std.compat;
 
 import FileLoader.Types;
 
-import vulkan_hpp;
+import vulkan;
 
 import VulkanEngine.ResourceSystem;
 import VulkanEngine.TextureTypes;

@@ -1,14 +1,16 @@
 module;
 
-#include <vulkan/vulkan.hpp>
-#include <vulkan/vulkan_core.h>
+#include <vulkan/vulkan.h>
+// VULKAN_HPP_DEFAULT_DISPATCHER is a macro, which an `import vulkan;` cannot
+// bring across the module boundary, so it must come from the macros header.
+#include <vulkan/vulkan_hpp_macros.hpp>
 
 module TestSupport.HeadlessVulkanBackend;
 
 import std;
 import std.compat;
 
-import vulkan_hpp;
+import vulkan;
 
 import VulkanBackend.Vulkan.VulkanBootstrap;
 import VulkanBackend.Vulkan.VulkanCapabilities;
