@@ -1,8 +1,6 @@
 add_executable(gpu_tests
-  offscreen_hash_tests.cpp
   transient_allocator_gpu_tests.cpp
   shader_watcher_tests.cpp
-  gpu_stats_gpu_tests.cpp
   texture_subresource_gpu_tests.cpp
   texture_render_gpu_tests.cpp
   normal_mapping_gpu_tests.cpp

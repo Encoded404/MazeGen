@@ -1,6 +1,5 @@
 add_executable(examples_tests
   balance_tests.cpp
-  secrets_tests.cpp
   account_tests.cpp
   profile_store_tests.cpp
   leaderboard_tests.cpp

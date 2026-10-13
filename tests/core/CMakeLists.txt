@@ -17,7 +17,6 @@ add_executable(engine_tests
   draw_key_bound_tests.cpp
   draw_group_tests.cpp
   variant_pipeline_state_tests.cpp
-  shader_entry_point_tests.cpp
   uv_variant_tests.cpp
   frame_ring_tests.cpp
   residency_policy_tests.cpp

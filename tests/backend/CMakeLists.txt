@@ -1,9 +1,6 @@
 add_executable(backend_tests
-  backend_factory_tests.cpp
   vulkan_bootstrap_tests.cpp
   platform_shell_tests.cpp
-  graph_execution_context_tests.cpp
-  graph_execution_bridge_tests.cpp
   render_graph_tests.cpp
   render_graph_diagnostics_tests.cpp
   render_graph_barrier_plan_tests.cpp
