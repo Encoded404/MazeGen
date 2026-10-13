@@ -131,6 +131,18 @@ public:
         config_.image_count = new_image_count;
         config_.swapchain_format = new_format;
         ImGui_ImplVulkan_SetMinImageCount(config_.image_count);
+
+        // imgui 1.92.1 (#8110/#8111): recreate the main pipeline against the
+        // new swapchain format without a full backend shutdown/reinit. The
+        // backend created the original pipeline from the same dynamic-rendering
+        // info during Init; re-supply it with the new format.
+        ImGui_ImplVulkan_PipelineInfo pipeline_info{};
+        pipeline_info.MSAASamples = VK_SAMPLE_COUNT_1_BIT;
+        pipeline_info.PipelineRenderingCreateInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO;
+        pipeline_info.PipelineRenderingCreateInfo.colorAttachmentCount = 1;
+        const vk::Format format = new_format;
+        pipeline_info.PipelineRenderingCreateInfo.pColorAttachmentFormats = reinterpret_cast<const VkFormat*>(&format);
+        ImGui_ImplVulkan_CreateMainPipeline(&pipeline_info);
     }
 
 private:
