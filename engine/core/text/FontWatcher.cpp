@@ -20,6 +20,13 @@ namespace {
 // from triggering a pointless re-read.
 constexpr std::array<std::string_view, 4> kFontExtensions{".ttf", ".otf", ".ttc", ".otc"};
 
+[[nodiscard]] bool IsWatchedFontFile(std::string_view filename) {
+    return std::ranges::any_of(kFontExtensions, [&filename](std::string_view ext) {
+        return filename.size() >= ext.size() &&
+               filename.substr(filename.size() - ext.size()) == ext;
+    });
+}
+
 struct WatcherListener final : efsw::FileWatchListener {
     FontWatcher& owner;
     std::string directory;
@@ -31,12 +38,17 @@ struct WatcherListener final : efsw::FileWatchListener {
                           const std::string& filename, efsw::Action action,
                           const std::string& /*oldFilename*/) override {
         if (action != efsw::Actions::Modified && action != efsw::Actions::Add) return;
-        const bool font = std::ranges::any_of(kFontExtensions, [&filename](std::string_view ext) {
-            return filename.size() >= ext.size() &&
-                   std::string_view(filename).substr(filename.size() - ext.size()) == ext;
-        });
+        const bool font = IsWatchedFontFile(filename);
         if (!font) return;
         owner.OnFileChanged(directory + "/" + filename);
+    }
+
+    // efsw 1.7: native queues can drop events (inotify overflow, atomic
+    // replace on some platforms). Recover by scheduling every candidate file
+    // in the watched directory; the per-path debounce collapses unchanged
+    // ones so this is cheap in the common case.
+    void handleMissedFileActions(efsw::WatchID /*watchid*/, const std::string& /*dir*/) override {
+        owner.OnMissedChanges(directory);
     }
 };
 
@@ -121,6 +133,21 @@ void FontWatcher::OnFileChanged(const std::string& full_path) {
     // Editors write several events per save; collapse a burst into one reload by
     // keeping the latest deadline per path.
     pending_[full_path] = std::chrono::steady_clock::now() + debounce_;
+}
+
+void FontWatcher::OnMissedChanges(const std::string& directory) {
+    // handleMissedFileActions reported dropped events: schedule every candidate
+    // file in the directory and let the debounce plus the consumer's own
+    // freshness checks drop the unchanged ones.
+    std::error_code ec;
+    const std::filesystem::directory_iterator it{directory, ec};
+    if (ec) return;
+    for (const auto& entry : it) {
+        if (!entry.is_regular_file(ec) || !IsWatchedFontFile(entry.path().filename().string())) {
+            continue;
+        }
+        OnFileChanged(entry.path().string());
+    }
 }
 
 std::vector<std::string> FontWatcher::PollChanged() {

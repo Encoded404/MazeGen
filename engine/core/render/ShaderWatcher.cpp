@@ -32,6 +32,23 @@ struct WatcherListener final : efsw::FileWatchListener {
         if (!filename.ends_with(".slang")) return; // ignore temp-file artifacts
         owner.OnFileChanged(filename);
     }
+
+    // efsw 1.7: native queues can drop events (inotify overflow, atomic
+    // replace on some platforms). Recover by scheduling every shader source
+    // in the watched directory; the debounce and the on-disk mtime check in
+    // ReloadPath collapse unchanged files, so this is cheap in the common case.
+    void handleMissedFileActions(efsw::WatchID /*watchid*/, const std::string& dir) override {
+        std::error_code ec;
+        const std::filesystem::directory_iterator it{dir, ec};
+        if (ec) return;
+        for (const auto& entry : it) {
+            if (!entry.is_regular_file(ec)) continue;
+            const std::string name = entry.path().filename().string();
+            if (name.ends_with(".slang")) {
+                owner.OnFileChanged(name);
+            }
+        }
+    }
 };
 
 // inotify reports several events per save (write, chmod, close), and editors

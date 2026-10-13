@@ -15,6 +15,16 @@ namespace VulkanEngine::TextureSystem {
 
 namespace {
 
+// Shared with the listener: only image sources can trigger a texture reload.
+[[nodiscard]] bool IsWatchedImageFile(std::string_view filename) {
+    constexpr std::array<std::string_view, 6> kExtensions{
+        ".ktx2", ".ktx", ".png", ".jpg", ".jpeg", ".basis"};
+    return std::ranges::any_of(kExtensions, [&filename](std::string_view ext) {
+        return filename.size() >= ext.size() &&
+               filename.substr(filename.size() - ext.size()) == ext;
+    });
+}
+
 struct WatcherListener final : efsw::FileWatchListener {
     TextureWatcher& owner;
     std::string directory;
@@ -27,14 +37,16 @@ struct WatcherListener final : efsw::FileWatchListener {
                           const std::string& /*oldFilename*/) override {
         if (action != efsw::Actions::Modified && action != efsw::Actions::Add) return;
         // Only image sources can trigger a texture reload.
-        constexpr std::array<std::string_view, 6> kExtensions{
-            ".ktx2", ".ktx", ".png", ".jpg", ".jpeg", ".basis"};
-        const bool image = std::ranges::any_of(kExtensions, [&filename](std::string_view ext) {
-            return filename.size() >= ext.size() &&
-                   std::string_view(filename).substr(filename.size() - ext.size()) == ext;
-        });
-        if (!image) return;
+        if (!IsWatchedImageFile(filename)) return;
         owner.OnFileChanged(directory + "/" + filename);
+    }
+
+    // efsw 1.7: native queues can drop events (inotify overflow, atomic
+    // replace on some platforms). Recover by scheduling every candidate file
+    // in the watched directory; the per-path debounce collapses unchanged
+    // ones so this is cheap in the common case.
+    void handleMissedFileActions(efsw::WatchID /*watchid*/, const std::string& /*dir*/) override {
+        owner.OnMissedChanges(directory);
     }
 };
 
@@ -119,6 +131,21 @@ void TextureWatcher::OnFileChanged(const std::string& full_path) {
     // Editors write several events per save; collapse a burst into one reload by
     // keeping the latest deadline per path.
     pending_[full_path] = std::chrono::steady_clock::now() + debounce_;
+}
+
+void TextureWatcher::OnMissedChanges(const std::string& directory) {
+    // handleMissedFileActions reported dropped events: schedule every candidate
+    // file in the directory and let the debounce + the reload path's own
+    // freshness checks drop the unchanged ones.
+    std::error_code ec;
+    const std::filesystem::directory_iterator it{directory, ec};
+    if (ec) return;
+    for (const auto& entry : it) {
+        if (!entry.is_regular_file(ec) || !IsWatchedImageFile(entry.path().filename().string())) {
+            continue;
+        }
+        OnFileChanged(entry.path().string());
+    }
 }
 
 std::vector<std::string> TextureWatcher::PollChanged() {

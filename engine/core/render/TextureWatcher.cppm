@@ -37,6 +37,11 @@ public:
     // Invoked from the efsw listener thread (internal use).
     void OnFileChanged(const std::string& full_path);
 
+    // Invoked from the efsw listener thread on a missed-actions report:
+    // efsw dropped queued events, so every candidate file in the watched
+    // directory is scheduled; the debounce drops the unchanged ones.
+    void OnMissedChanges(const std::string& directory);
+
     // Queues a changed path exactly as a filesystem event would. Public so a
     // caller (or a test) can trigger a reload without depending on platform
     // watcher timing.
