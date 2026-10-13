@@ -199,8 +199,12 @@ namespace {
                 entry.type_enum = "eParameterBlock";
                 entries.push_back(std::move(entry));
             }
-            auto* el = tl->getElementVarLayout();
-            if (el) collectAllBindingsRecursive(el, entries);
+            // 2026.18 added getContentVarLayout: the block's content variable
+            // in one hop (element layout for containers, null for
+            // non-container types - no hand-rolled unwrap needed).
+            if (auto* content = tl->getContentVarLayout(); content != nullptr) {
+                collectAllBindingsRecursive(content, entries);
+            }
             return;
         }
 
