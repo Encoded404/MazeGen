@@ -1,7 +1,5 @@
 module;
 
-#include <vulkan/vulkan.h>
-
 export module TestSupport.TextureRenderHarness;
 
 import std;

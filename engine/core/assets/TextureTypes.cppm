@@ -1,7 +1,5 @@
 module;
 
-#include <vulkan/vulkan_core.h>
-
 export module VulkanEngine.TextureTypes;
 
 import std;

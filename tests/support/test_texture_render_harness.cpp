@@ -1,7 +1,5 @@
 module;
 
-#include <vulkan/vulkan.h>
-
 #include <logging/logging_macros.hpp>
 
 module TestSupport.TextureRenderHarness;
