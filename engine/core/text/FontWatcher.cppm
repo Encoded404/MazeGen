@@ -24,6 +24,13 @@ public:
 
     void Start();
     void Stop();
+    // Stops the watcher, then hands the whole object to a detached thread that
+    // destroys it (fire-and-forget; never wait for completion afterwards).
+    // The efsw FileWatcher death involves joining its internal thread, which
+    // can block for efsw's poll interval, so engine shutdown moves it off the
+    // critical path. The whole object is detached on purpose: the efsw listeners
+    // capture `this` and must outlive the join. Null is allowed and is a no-op.
+    static void StopDetached(std::unique_ptr<FontWatcher> watcher);
 
     // Watches `directory` (non-recursive). May be called before Start(): the
     // directory is remembered and watched once Start() runs. Returns false only
@@ -63,6 +70,11 @@ private:
     std::unordered_map<std::string, std::chrono::steady_clock::time_point> pending_;
     std::atomic<bool> stop_{false};
     std::chrono::milliseconds debounce_{200};
+
+    // Sets the stop flag and drops scheduled changes. Once this returns, no efsw
+    // callback can enqueue anything; the watchers' own state is still alive until
+    // the object is destroyed.
+    void Quiesce();
 };
 
 } // namespace VulkanEngine::Text

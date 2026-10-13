@@ -229,7 +229,7 @@ void EngineBootstrap::Shutdown(EngineContext& ctx,
     // Dependency edges (a task waits for everything it names):
     //   - imgui_backend     -> imgui_system: both touch the same shared backend object.
     //   - shader_manager    -> shader_watcher: the watcher's efsw thread may be inside
-    //     OnFileChanged(); StopAsync() quiesces it before the manager is destroyed.
+    //     OnFileChanged(); StopDetached() quiesces it before the manager is destroyed.
     //   - texture_reloader  -> texture_watcher: the listener must stop enqueuing first.
     //   - texture_residency -> texture_uploader, texture_reloader.
     //   - font_reloader     -> font_watcher: same listener rule for font files.
@@ -278,8 +278,10 @@ void EngineBootstrap::Shutdown(EngineContext& ctx,
     if (ctx.shader_watcher) {
         shader_watcher_id = teardown.Add("engineshutdown.shader_watcher", [&ctx] {
             auto s = DebugSection("engineshutdown.shader_watcher");
-            ctx.shader_watcher->StopAsync();
-            ctx.shader_watcher.reset();
+            // The efsw join inside ~ShaderWatcher can block for efsw's poll
+            // interval; StopDetached() quiesces inline and hands the whole
+            // object to a detached thread so the join stays off this path.
+            ShaderSystem::ShaderWatcher::StopDetached(std::move(ctx.shader_watcher));
         });
     }
 
@@ -360,8 +362,10 @@ void EngineBootstrap::Shutdown(EngineContext& ctx,
     if (ctx.texture_watcher) {
         texture_watcher_id = teardown.Add("engineshutdown.texture_watcher", [&ctx] {
             auto s = DebugSection("engineshutdown.texture_watcher");
-            ctx.texture_watcher->Stop();
-            ctx.texture_watcher.reset();
+            // StopDetached() quiesces inline and hands the object to a detached
+            // thread: the efsw join can block for efsw's poll interval and must
+            // not gate texture_reloader/residency below.
+            TextureSystem::TextureWatcher::StopDetached(std::move(ctx.texture_watcher));
         });
     }
     if (ctx.texture_reloader) {
@@ -391,8 +395,10 @@ void EngineBootstrap::Shutdown(EngineContext& ctx,
     if (ctx.font_watcher) {
         font_watcher_id = teardown.Add("engineshutdown.font_watcher", [&ctx] {
             auto s = DebugSection("engineshutdown.font_watcher");
-            ctx.font_watcher->Stop();
-            ctx.font_watcher.reset();
+            // StopDetached() quiesces inline and hands the object to a detached
+            // thread: the efsw join can block for efsw's poll interval and must
+            // not gate font_reloader/text_system below.
+            Text::FontWatcher::StopDetached(std::move(ctx.font_watcher));
         });
     }
     if (ctx.font_reloader) {

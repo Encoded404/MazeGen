@@ -11,6 +11,8 @@ import std.compat;
 
 import logiface;
 
+import VulkanShared.Teardown;
+
 namespace VulkanEngine::TextureSystem {
 
 namespace {
@@ -116,13 +118,25 @@ std::size_t TextureWatcher::GetRegisteredDirectoryCount() const {
     return registered_dirs_.size();
 }
 
+void TextureWatcher::Quiesce() {
+    std::scoped_lock lock(mutex_);
+    stop_.store(true, std::memory_order_release);
+    pending_.clear();
+}
+
 void TextureWatcher::Stop() {
-    {
-        std::scoped_lock lock(mutex_);
-        stop_.store(true, std::memory_order_release);
-        pending_.clear();
-    }
+    Quiesce();
     impl_.reset();
+}
+
+void TextureWatcher::StopDetached(std::unique_ptr<TextureWatcher> watcher) {
+    if (!watcher) return;
+    // Quiesce inline (cheap): after this, efsw callbacks are no-ops, so the
+    // expensive efsw thread join inside ~TextureWatcher can run off the shutdown
+    // critical path. The whole object is handed over because the listeners
+    // capture `this` and must stay alive until the efsw thread has been joined.
+    watcher->Quiesce();
+    VulkanShared::RunDetached([w = watcher.release()]() mutable { delete w; });
 }
 
 void TextureWatcher::OnFileChanged(const std::string& full_path) {

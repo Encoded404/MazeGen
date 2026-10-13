@@ -139,15 +139,14 @@ void ShaderWatcher::Stop() {
     impl_.reset(); // ~FileWatcher stops and joins its internal thread
 }
 
-void ShaderWatcher::StopAsync() {
-    Quiesce();
-    // Quiesce() guarantees no thread can reach `shaders_` anymore, so dropping
-    // the efsw watcher (whose internal thread join can block for its poll
-    // interval) on a detached thread is safe: the join owns nothing else.
-    auto orphan = std::move(impl_);
-    if (orphan) {
-        VulkanShared::RunDetached([orphan = std::move(orphan)]() mutable { orphan.reset(); });
-    }
+void ShaderWatcher::StopDetached(std::unique_ptr<ShaderWatcher> watcher) {
+    if (!watcher) return;
+    // Quiesce inline: after this no efsw/debounce path can reach `shaders_`, so
+    // the efsw thread join inside ~ShaderWatcher can run off the shutdown
+    // critical path. The whole object is handed over because the listener
+    // captures `this` and must stay alive until the efsw thread has been joined.
+    watcher->Quiesce();
+    VulkanShared::RunDetached([w = watcher.release()]() mutable { delete w; });
 }
 
 void ShaderWatcher::Quiesce() {

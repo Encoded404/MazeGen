@@ -17,11 +17,15 @@ public:
 
     void Start();
     void Stop();
-    // Like Stop(), but drops the efsw FileWatcher (whose internal thread join can
-    // block for its poll interval) on a detached thread. Safe only because Stop()
-    // first quiesces every path that touches the shader manager; the detached
-    // join owns no other resources. Never wait for completion afterwards.
-    void StopAsync();
+    // Stops the watcher, then hands the whole object to a detached thread that
+    // destroys it (fire-and-forget; never wait for completion afterwards).
+    // The efsw FileWatcher death involves joining its internal thread, which
+    // can block for its poll interval, so engine shutdown moves it off the
+    // critical path. Stop()'s quiesce guarantees every efsw/debounce path has
+    // stopped reaching the shader manager before the object moves. The whole
+    // object is detached on purpose: the efsw listener captures `this` and must
+    // outlive the join. Null is allowed and is a no-op.
+    static void StopDetached(std::unique_ptr<ShaderWatcher> watcher);
 
     // ── Registration-time watching ──
     // A shader registered after Start() lives in a directory that was not
