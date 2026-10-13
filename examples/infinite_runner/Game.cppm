@@ -25,11 +25,10 @@ struct EndpointOverride {
 
 // Infinite runner built entirely on the game layer.
 //
-// A fixed pool of wall entities scrolls toward a stationary player cube. Each
-// wall is two blocks with a randomly placed horizontal gap; the player must
-// line up with the gap to pass. There is no engine collision or entity
-// destruction: walls are recycled in place, and the player is tested both as a
-// discrete box against the block geometry and as a ray swept between frames.
+// A fixed pool of wall entities scrolls toward a stationary player cube.
+// Each wall is two blocks with a randomly placed horizontal gap.
+// the player must line up with the gap to pass.
+// There is no engine collision so the player is tested both as a discrete box against the block geometry and as a ray swept between frames.
 class Game {
 public:
     explicit Game(const std::filesystem::path& executable_path, EndpointOverride endpoint = {});
@@ -42,9 +41,12 @@ public:
 
 private:
     bool OnSetup(VulkanEngine::Application::ApplicationContext& ctx);
+
     // Simulation: player and wall integration plus collision, and gameplay timers.
     // Runs on the fixed-step hook so the run is rate-independent of the render rate.
     void OnFixedUpdate(const VulkanEngine::Application::ApplicationContext& ctx);
+
+
     void OnFrameUpdate(const VulkanEngine::Application::ApplicationContext& ctx);
     void OnFrameRender(const VulkanEngine::Application::ApplicationContext& ctx);
     void OnShutdown(VulkanEngine::Application::ApplicationContext& ctx);
@@ -66,10 +68,12 @@ private:
     void ResetWalls();
     void ResetRun();
     void UpdatePlayer(const VulkanEngine::Application::ApplicationContext& ctx, float delta_time);
+
     // Integrates every wall and sweeps the player against their pre-move boxes.
     // Owns the before/after pair explicitly, so the collision never depends on
     // where an earlier update left shared state. Returns true on a hit.
     bool StepWalls(float delta_time, float player_x_before, float player_dx);
+
     // Discrete box-vs-box overlap at the settled end-of-frame positions.
     bool PlayerOverlapsAnyWall() const;
 
@@ -95,8 +99,9 @@ private:
     VulkanEngine::MaterialManager::MaterialRef player_material_{};
     VulkanEngine::MaterialManager::MaterialRef wall_material_{};
     VulkanEngine::MaterialManager::MaterialRef floor_material_{};
-    // Solid-colour textures are uploaded to the bindless heap immediately; keep
-    // the CPU resources alive for the lifetime of the run.
+
+    // Solid-colour textures are uploaded to the bindless heap immediately
+    // keep the CPU resources alive for the lifetime of the run.
     std::vector<std::shared_ptr<VulkanEngine::TextureResource>> textures_{};
 
     VulkanEngine::EntityId camera_entity_{};
@@ -114,6 +119,7 @@ private:
     // Present only when per-user storage was resolved. Holds the profile index,
     // each profile's private token, local bests and settings.
     std::optional<Examples::InfiniteRunner::Account::ProfileStore> profiles_{};
+
     // The login/profile window. Gameplay input is ignored while it is open.
     bool login_open_ = false;
     std::string login_status_{};
@@ -129,6 +135,7 @@ private:
     std::string pending_profile_id_{};
     std::string pending_username_{};
     std::string pending_registration_token_{};
+
     // Profile awaiting delete confirmation; empty when no dialog is open.
     std::string delete_candidate_id_{};
     bool delete_popup_open_ = false;
@@ -136,11 +143,14 @@ private:
     void DrawLoginWindow();
     void PollPendingAccount();
     void StartRegistration(std::string username, std::string display_name);
+
     // Turns an offline, local-only profile into a registered account.
     void RegisterLocalProfile(std::string_view profile_id);
     void SelectProfile(std::string_view profile_id);
+
     // Re-points the client at whichever profile is active after a removal.
     void RefreshActiveCredentials();
+
     // Issues a top-list request using the active profile's display filters.
     void RequestLeaderboard();
     void SubmitRun(std::int32_t score);

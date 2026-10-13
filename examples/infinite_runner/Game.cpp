@@ -31,6 +31,7 @@ import Examples.InfiniteRunner.Account.ProfileStore;
 
 namespace Examples::InfiniteRunner::Game {
 
+// anonymous namespaces are a c++ stable, a way to hide functions to be hidden from other translation units
 namespace {
 
 // UTC calendar date for a score timestamp, or "-" when it predates date
