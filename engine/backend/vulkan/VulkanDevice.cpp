@@ -1,8 +1,8 @@
 module;
 
 #include <logging/logging_macros.hpp>
-#include <vulkan/vulkan_core.h>
-
+// VULKAN_HPP_DEFAULT_DISPATCHER is a macro, which an `import vulkan;` cannot
+// bring across the module boundary, so it must come from the macros header.
 #include <vulkan/vulkan_hpp_macros.hpp>
 
 module VulkanBackend.Vulkan.VulkanDevice;
@@ -45,23 +45,17 @@ bool VulkanDevice::SelectPhysicalDevice(const VulkanInstance& instance) {
             supported_.driver_properties = props2.get<vk::PhysicalDeviceDriverProperties>();
 
             // Format support for the texture-system candidate set, via
-            // vkGetPhysicalDeviceFormatProperties2 + VkFormatProperties3.
+            // getFormatProperties2 + vk::FormatProperties3.
             supported_.format_supports.clear();
             supported_.format_supports.reserve(kCandidateFormats.size());
             for (const vk::Format format : kCandidateFormats) {
-                VkFormatProperties3 props3{};
-                props3.sType = VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_3;
-                VkFormatProperties2 props2_raw{};
-                props2_raw.sType = VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2;
-                props2_raw.pNext = &props3;
-                vk_instance.getDispatcher()->vkGetPhysicalDeviceFormatProperties2(
-                    static_cast<VkPhysicalDevice>(*device),
-                    static_cast<VkFormat>(format),
-                    &props2_raw);
+                const auto props_chain =
+                    device.getFormatProperties2<vk::FormatProperties2, vk::FormatProperties3>(format);
+                const auto& props3 = props_chain.get<vk::FormatProperties3>();
                 supported_.format_supports.push_back(FormatSupport{
                     .format = format,
-                    .linear_features = vk::FormatFeatureFlags2{props3.linearTilingFeatures},
-                    .optimal_features = vk::FormatFeatureFlags2{props3.optimalTilingFeatures},
+                    .linear_features = props3.linearTilingFeatures,
+                    .optimal_features = props3.optimalTilingFeatures,
                 });
             }
 
@@ -370,16 +364,13 @@ bool VulkanDevice::CreateLogicalDeviceAndResources(const std::uint32_t frames_in
                                    requested_extensions.end();
         std::vector<VulkanCapabilities::MemoryHeapBudget> budget;
         if (memory_budget) {
-            vk::PhysicalDeviceMemoryBudgetPropertiesEXT budget_props{};
-            vk::PhysicalDeviceMemoryProperties2 props{};
-            props.pNext = &budget_props;
-            // The raii overload takes no pNext pointer; call through the
-            // dispatcher with layout-identical C structs (as ImageHeap does).
-            auto* dispatcher = physical_device_->getDispatcher();
-            dispatcher->vkGetPhysicalDeviceMemoryProperties2(
-                static_cast<vk::PhysicalDevice::CType>(**physical_device_),
-                reinterpret_cast<VkPhysicalDeviceMemoryProperties2*>(&props));
-            const std::uint32_t heaps = props.memoryProperties.memoryHeapCount;
+            // The raii StructureChain overload threads the budget properties
+            // through the pNext chain without exposing any C types.
+            const auto props_chain = physical_device_->getMemoryProperties2<
+                vk::PhysicalDeviceMemoryProperties2, vk::PhysicalDeviceMemoryBudgetPropertiesEXT>();
+            const auto& budget_props = props_chain.get<vk::PhysicalDeviceMemoryBudgetPropertiesEXT>();
+            const std::uint32_t heaps =
+                props_chain.get<vk::PhysicalDeviceMemoryProperties2>().memoryProperties.memoryHeapCount;
             budget.reserve(heaps);
             for (std::uint32_t i = 0; i < heaps; ++i) {
                 budget.push_back(VulkanCapabilities::MemoryHeapBudget{

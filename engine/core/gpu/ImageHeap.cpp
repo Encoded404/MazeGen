@@ -2,9 +2,6 @@ module;
 
 #include <logging/logging_macros.hpp>
 
-#include <vulkan/vulkan.h>
-#include <vulkan/vulkan_hpp_macros.hpp>
-
 module VulkanEngine.GpuResources.GpuImageHeap;
 
 import std;
@@ -124,20 +121,11 @@ HeapImage GpuImageHeap::Allocate(vk::ImageCreateInfo image_info, const HeapViewD
 
     auto image = std::make_unique<vk::raii::Image>(device, image_info);
 
-    vk::MemoryDedicatedRequirements dedicated_requirements{};
-    vk::MemoryRequirements2 requirements{};
-    requirements.pNext = &dedicated_requirements;
     vk::ImageMemoryRequirementsInfo2 requirements_info{};
     requirements_info.image = static_cast<vk::Image>(**image);
-    // The pNext-chained dedicated-requirements query has no enhanced-return
-    // overload, so go through the dispatcher with the layout-identical C structs.
-    auto* dispatcher = device.getDispatcher();
-    dispatcher->vkGetImageMemoryRequirements2(
-        static_cast<vk::Device::CType>(*device),
-        reinterpret_cast<const VkImageMemoryRequirementsInfo2*>(&requirements_info),
-        reinterpret_cast<VkMemoryRequirements2*>(&requirements));
-
-    const vk::MemoryRequirements memory_requirements = requirements.memoryRequirements;
+    const auto requirements_chain = device.getImageMemoryRequirements2<vk::MemoryRequirements2, vk::MemoryDedicatedRequirements>(requirements_info);
+    const vk::MemoryRequirements memory_requirements = requirements_chain.get<vk::MemoryRequirements2>().memoryRequirements;
+    const bool requires_dedicated = requirements_chain.get<vk::MemoryDedicatedRequirements>().requiresDedicatedAllocation == vk::True;
 
     const auto memory_properties = physical_device.getMemoryProperties();
     std::optional<std::uint32_t> memory_type_index;
@@ -157,7 +145,7 @@ HeapImage GpuImageHeap::Allocate(vk::ImageCreateInfo image_info, const HeapViewD
     ImageRecord record{};
     record.size = memory_requirements.size;
     record.alignment = std::max<vk::DeviceSize>(memory_requirements.alignment, buffer_image_granularity_);
-    record.dedicated = dedicated_requirements.requiresDedicatedAllocation == vk::True;
+    record.dedicated = requires_dedicated;
 
     if (record.dedicated) {
         vk::MemoryDedicatedAllocateInfo dedicated_info{};

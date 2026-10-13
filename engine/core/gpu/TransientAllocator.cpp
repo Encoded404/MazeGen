@@ -2,9 +2,6 @@ module;
 
 #include <logging/logging_macros.hpp>
 
-#include <vulkan/vulkan.h>
-#include <vulkan/vulkan_hpp_macros.hpp>
-
 module VulkanEngine.GpuResources.TransientAllocator;
 
 import std;
@@ -40,18 +37,11 @@ std::optional<std::uint32_t> FindMemoryType(const vk::PhysicalDeviceMemoryProper
 }
 
 ImageReqs QueryImageRequirements(const vk::raii::Device& device, const vk::raii::Image& image) {
-    vk::MemoryDedicatedRequirements dedicated{};
-    vk::MemoryRequirements2 requirements{};
-    requirements.pNext = &dedicated;
-
     vk::ImageMemoryRequirementsInfo2 info{};
     info.image = static_cast<vk::Image>(*image);
-
-    auto* dispatcher = device.getDispatcher();
-    dispatcher->vkGetImageMemoryRequirements2(
-        static_cast<vk::Device::CType>(*device),
-        reinterpret_cast<const VkImageMemoryRequirementsInfo2*>(&info),
-        reinterpret_cast<VkMemoryRequirements2*>(&requirements));
+    const auto chain = device.getImageMemoryRequirements2<vk::MemoryRequirements2, vk::MemoryDedicatedRequirements>(info);
+    const auto& requirements = chain.get<vk::MemoryRequirements2>();
+    const auto& dedicated = chain.get<vk::MemoryDedicatedRequirements>();
 
     ImageReqs result{};
     result.size = requirements.memoryRequirements.size;
