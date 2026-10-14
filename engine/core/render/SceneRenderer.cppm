@@ -402,37 +402,15 @@ private:
         glm::vec4 proj_info{};
     };
 
-    bool CreateExpandPipeline(const VulkanBackend::Vulkan::IVulkanBootstrap& backend,
+    // ── Built-in pipeline creation (table-driven, single submission) ──
+    // Creates the Hi-Z set layout + pool, every scene pipeline layout, and
+    // compiles all seven compute pipelines plus the depth-prepass pipeline in
+    // one batched submission. Fails initialization on the first pipeline
+    // creation error instead of silently booting without a pipeline.
+    bool CreateScenePipelines(VulkanBackend::Vulkan::IVulkanBootstrap& backend,
                               ShaderSystem::ShaderManager& shader_mgr,
                               ShaderSystem::PipelineFactory& pipeline_factory,
-                              ShaderSystem::ShaderId shader_id);
-    bool CreateDepthPipeline(VulkanBackend::Vulkan::IVulkanBootstrap& backend,
-                             ShaderSystem::ShaderManager& shader_mgr,
-                             ShaderSystem::PipelineFactory& pipeline_factory,
-                             ShaderSystem::ShaderId vert_id,
-                             ShaderSystem::ShaderId frag_id,
-                             const vk::PipelineRasterizationStateCreateInfo& rasterization);
-    bool CreateHiZPipeline(VulkanBackend::Vulkan::IVulkanBootstrap& backend,
-                           ShaderSystem::ShaderManager& shader_mgr,
-                           ShaderSystem::PipelineFactory& pipeline_factory,
-                           ShaderSystem::ShaderId shader_id);
-    bool CreateOcclusionPipeline(const VulkanBackend::Vulkan::IVulkanBootstrap& backend,
-                                  ShaderSystem::ShaderManager& shader_mgr,
-                                  ShaderSystem::PipelineFactory& pipeline_factory,
-                                  ShaderSystem::ShaderId shader_id);
-    bool CreateOccluderSelectPipeline(const VulkanBackend::Vulkan::IVulkanBootstrap& backend,
-                                       ShaderSystem::ShaderManager& shader_mgr,
-                                       ShaderSystem::PipelineFactory& pipeline_factory,
-                                       ShaderSystem::ShaderId shader_id);
-    bool CreatePreCullPipeline(const VulkanBackend::Vulkan::IVulkanBootstrap& backend,
-                                ShaderSystem::ShaderManager& shader_mgr,
-                                ShaderSystem::PipelineFactory& pipeline_factory,
-                                ShaderSystem::ShaderId shader_id);
-    bool CreateCollectPipelines(const VulkanBackend::Vulkan::IVulkanBootstrap& backend,
-                                 ShaderSystem::ShaderManager& shader_mgr,
-                                 ShaderSystem::PipelineFactory& pipeline_factory,
-                                 ShaderSystem::ShaderId count_id,
-                                 ShaderSystem::ShaderId write_id);
+                              const EngineShaderIds& shader_ids);
 
 
     void UpdateBlockArrayDescriptor(vk::DescriptorSet desc_set, std::uint32_t binding,

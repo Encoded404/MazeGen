@@ -50,9 +50,10 @@ void ApplyDrawModeSpec(Desc& desc, std::uint32_t draw_mode_value) {
 
 struct ComputePipelineTemplate {
     std::string_view debug_name;
-    std::uint32_t    push_constant_size;
-    vk::ShaderStageFlags push_constant_stages = vk::ShaderStageFlagBits::eCompute;
     std::string      entry_point{"main"};
+    // NOTE: the pipeline layout (descriptor sets + push-constant range) is not
+    // template state — it is owned by the subsystem that binds it and is
+    // referenced by the built desc. The builder only reads the entry point.
 };
 
 struct GraphicsPipelineTemplate {

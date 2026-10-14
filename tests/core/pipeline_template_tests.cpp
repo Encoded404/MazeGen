@@ -62,7 +62,6 @@ TEST(ApplyDrawModeSpec, WritesConstantIdZeroPayloadOnGraphicsDesc) {
 TEST(MakeComputeDesc, CarriesShaderLayoutAndTemplateEntryPoint) {
     const ComputePipelineTemplate tmpl{
         .debug_name = "test-compute",
-        .push_constant_size = 16,
         .entry_point = "main",
     };
     const auto desc = MakeComputeDesc(tmpl, kComp, NullLayout());
@@ -78,7 +77,6 @@ TEST(MakeComputeDesc, CarriesShaderLayoutAndTemplateEntryPoint) {
 TEST(MakeComputeDesc, HonorsNonDefaultEntryPoint) {
     const ComputePipelineTemplate tmpl{
         .debug_name = "uv1-compute",
-        .push_constant_size = 16,
         .entry_point = "main",
     };
     const auto desc = MakeComputeDesc(tmpl, kComp, NullLayout());
@@ -86,7 +84,6 @@ TEST(MakeComputeDesc, HonorsNonDefaultEntryPoint) {
     // A caller that needs a named wrapper entry point sets it on the template.
     const ComputePipelineTemplate named{
         .debug_name = "named",
-        .push_constant_size = 16,
         .entry_point = "main_uv1",
     };
     EXPECT_EQ(MakeComputeDesc(named, kComp, NullLayout()).entry_point, "main_uv1");
