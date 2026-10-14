@@ -163,6 +163,69 @@ namespace {
             desc.color_blend_attachments.empty() ? nullptr : desc.color_blend_attachments.data();
     }
 
+    // Staging owned by a monolithic create-info. Every Vulkan struct referenced
+    // through a pointer must outlive the driver call, so single creations keep
+    // the staging on their stack for the duration and batch calls keep one
+    // staging vector alive across the whole call.
+    struct MonolithicStaging {
+        vk::SpecializationInfo vs_spec{};
+        std::array<vk::PipelineShaderStageCreateInfo, 2> stages{};
+        vk::PipelineDynamicStateCreateInfo dyn{};
+        vk::PipelineRenderingCreateInfo ri{};
+    };
+
+    // Build the monolithic graphics create-info for `desc`. The module handles
+    // are borrowed views into ShaderManager-owned modules; the staging struct
+    // owns every other pointer the info chains into.
+    vk::GraphicsPipelineCreateInfo BuildMonolithicCI(
+            const GraphicsPipelineDesc& desc,
+            vk::ShaderModule vert_mod,
+            vk::ShaderModule frag_mod,
+            MonolithicStaging& st) {
+        // Vertex-stage specialization constants select the draw mode. The
+        // fragment shader has no constant_id 0, so the map applies to the
+        // vertex stage only.
+        // (Field-wise reset: vulkan-hpp value types convert to their native
+        // structs, which makes `= {}` assignment ambiguous under -Wall.)
+        st.vs_spec.mapEntryCount = 0;
+        st.vs_spec.pMapEntries = nullptr;
+        st.vs_spec.dataSize = 0;
+        st.vs_spec.pData = nullptr;
+        if (!desc.spec_entries.empty()) {
+            st.vs_spec.mapEntryCount = static_cast<std::uint32_t>(desc.spec_entries.size());
+            st.vs_spec.pMapEntries = desc.spec_entries.data();
+            st.vs_spec.dataSize = desc.spec_data.size();
+            st.vs_spec.pData = desc.spec_data.data();
+        }
+
+        vk::PipelineShaderStageCreateInfo vs({}, vk::ShaderStageFlagBits::eVertex,
+                                             vert_mod, desc.vertex_entry_point.c_str());
+        if (!desc.spec_entries.empty()) {
+            vs.pSpecializationInfo = &st.vs_spec;
+        }
+        st.stages = {
+            vs,
+            vk::PipelineShaderStageCreateInfo{{}, vk::ShaderStageFlagBits::eFragment,
+                                              frag_mod, desc.fragment_entry_point.c_str()}
+        };
+
+        st.dyn = vk::PipelineDynamicStateCreateInfo({}, desc.dynamic_states);
+
+        st.ri.pNext = nullptr;
+        st.ri.colorAttachmentCount = static_cast<std::uint32_t>(desc.color_formats.size());
+        st.ri.pColorAttachmentFormats = desc.color_formats.data();
+        st.ri.depthAttachmentFormat = desc.depth_format;
+        st.ri.stencilAttachmentFormat = desc.stencil_format;
+
+        vk::GraphicsPipelineCreateInfo pi({}, st.stages, &desc.vertex_input,
+            &desc.input_assembly, nullptr, &desc.viewport,
+            &desc.rasterization, &desc.multisample,
+            &desc.depth_stencil, &desc.color_blend, &st.dyn,
+            desc.layout, nullptr, 0, {}, 0);
+        pi.setPNext(&st.ri);
+        return pi;
+    }
+
     // One-line, log-friendly summary of the pipeline state a driver would reject.
     std::string Describe(const GraphicsPipelineDesc& d) {
         std::string color_formats;
@@ -470,39 +533,9 @@ PipelineFactory::CreateGraphicsMonolithic(const GraphicsPipelineDesc& desc,
     auto vert_mod = FetchModule(shaders, desc.vertex_shader);
     auto frag_mod = FetchModule(shaders, desc.fragment_shader);
 
-    // Vertex-stage specialization constants select the draw mode. The fragment
-    // shader has no constant_id 0, so the map applies to the vertex stage only.
-    vk::SpecializationInfo vs_spec{};
-    if (!desc.spec_entries.empty()) {
-        vs_spec.mapEntryCount = static_cast<std::uint32_t>(desc.spec_entries.size());
-        vs_spec.pMapEntries = desc.spec_entries.data();
-        vs_spec.dataSize = desc.spec_data.size();
-        vs_spec.pData = desc.spec_data.data();
-    }
-
-    vk::PipelineShaderStageCreateInfo vs({}, vk::ShaderStageFlagBits::eVertex, vert_mod, desc.vertex_entry_point.c_str());
-    if (!desc.spec_entries.empty()) {
-        vs.pSpecializationInfo = &vs_spec;
-    }
-    std::array<vk::PipelineShaderStageCreateInfo, 2> stages = {
-        vs,
-        vk::PipelineShaderStageCreateInfo{{}, vk::ShaderStageFlagBits::eFragment, frag_mod, desc.fragment_entry_point.c_str()}
-    };
-
-    vk::PipelineDynamicStateCreateInfo dyn_state({}, desc.dynamic_states);
-
-    vk::PipelineRenderingCreateInfo ri{};
-    ri.colorAttachmentCount = static_cast<std::uint32_t>(desc.color_formats.size());
-    ri.pColorAttachmentFormats = desc.color_formats.data();
-    ri.depthAttachmentFormat = desc.depth_format;
-    ri.stencilAttachmentFormat = desc.stencil_format;
-
-    vk::GraphicsPipelineCreateInfo pi({}, stages, &desc.vertex_input,
-        &desc.input_assembly, nullptr, &desc.viewport,
-        &desc.rasterization, &desc.multisample,
-        &desc.depth_stencil, &desc.color_blend, &dyn_state,
-        desc.layout, nullptr, 0, {}, 0);
-    pi.setPNext(&ri);
+    MonolithicStaging st{};
+    const vk::GraphicsPipelineCreateInfo pi =
+        BuildMonolithicCI(desc, vert_mod, frag_mod, st);
 
     vk::raii::Pipeline pipeline = device_.createGraphicsPipeline(cache_, pi);
     LOGIFACE_LOG(debug, std::format("PipelineFactory: monolithic pipeline created: 0x{:x}",
@@ -922,6 +955,189 @@ std::uint64_t PipelineFactory::HashFragmentOutput(
     append_bytes(data, &depth_fmt, sizeof(depth_fmt));
     append_bytes(data, &stencil_fmt, sizeof(stencil_fmt));
     return fnv1a_hash(data);
+}
+
+// ── Batched creation (PipelineCompiler submission window) ───────────────────
+
+std::vector<std::expected<PipelineProduct, PipelineError>>
+PipelineFactory::CreateComputeBatch(std::span<const ComputePipelineDesc> descs,
+                                      ShaderManager& shaders) const {
+    const std::size_t n = descs.size();
+    std::vector<std::expected<PipelineProduct, PipelineError>> outcomes(n);
+    if (n == 0) return outcomes;
+
+    // Module fetch failures are per-desc (a broken asset must not poison the
+    // rest of the batch), so fetch first and only include healthy descs in the
+    // driver call. The spec staging must outlive the call, hence the vector.
+    struct SpecStaging {
+        vk::SpecializationInfo spec{};
+        std::optional<vk::ShaderModule> module_;
+    };
+    std::vector<SpecStaging> staging(n);
+    std::vector<vk::ComputePipelineCreateInfo> infos;
+    infos.reserve(n);
+    std::vector<std::size_t> batched; // infos[j] belongs to descs[batched[j]]
+    for (std::size_t i = 0; i < n; ++i) {
+        const auto& desc = descs[i];
+        try {
+            staging[i].module_ = FetchModule(shaders, desc.shader);
+        } catch (const PipelineCreationError& e) {
+            outcomes[i] = std::unexpected(e.error);
+            continue;
+        }
+        vk::PipelineShaderStageCreateInfo ss({}, vk::ShaderStageFlagBits::eCompute,
+                                             *staging[i].module_,
+                                             desc.entry_point.c_str());
+        if (!desc.spec_entries.empty()) {
+            staging[i].spec.mapEntryCount =
+                static_cast<std::uint32_t>(desc.spec_entries.size());
+            staging[i].spec.pMapEntries = desc.spec_entries.data();
+            staging[i].spec.dataSize = desc.spec_data.size();
+            staging[i].spec.pData = desc.spec_data.data();
+            ss.pSpecializationInfo = &staging[i].spec;
+        }
+        vk::ComputePipelineCreateInfo ci{};
+        ci.flags = {};
+        ci.stage = ss;
+        ci.layout = desc.layout;
+        infos.push_back(std::move(ci));
+        batched.push_back(i);
+    }
+
+    if (!infos.empty()) {
+        std::vector<std::size_t> retry; // batch entries needing single-desc creation
+        try {
+            auto pipelines =
+                device_.createComputePipelines(cache_, infos, nullptr);
+            const std::size_t count = std::min(pipelines.size(), infos.size());
+            for (std::size_t j = 0; j < count; ++j) {
+                const std::size_t di = batched[j];
+                if (*pipelines[j]) {
+                    outcomes[di] =
+                        PipelineProduct::Monolithic(std::move(pipelines[j]));
+                    LOGIFACE_LOG(debug, std::format("PipelineFactory: batched compute "
+                                                    "pipeline created (shader={}): 0x{:x}",
+                                                    descs[di].shader, HandleToU64(*pipelines[j])));
+                } else {
+                    // Individually failed inside the batch (raii wraps the null
+                    // handle the driver wrote — see the header note).
+                    retry.push_back(di);
+                }
+            }
+            for (std::size_t j = count; j < infos.size(); ++j) {
+                retry.push_back(batched[j]);
+            }
+        } catch (const vk::SystemError& e) {
+            LOGIFACE_LOG(debug, std::format("PipelineFactory: batched compute creation "
+                                            "threw ({}) — re-creating the batch one by one for "
+                                            "per-desc error attribution", e.what()));
+            retry = batched;
+        }
+        for (const std::size_t di : retry) {
+            if (outcomes[di]) continue;
+            outcomes[di] = CreateCompute(descs[di], shaders);
+        }
+    }
+    return outcomes;
+}
+
+std::vector<std::expected<PipelineProduct, PipelineError>>
+PipelineFactory::CreateGraphicsBatch(std::span<const GraphicsPipelineDesc> descs,
+                                       ShaderManager& shaders) const {
+    const std::size_t n = descs.size();
+    std::vector<std::expected<PipelineProduct, PipelineError>> outcomes(n);
+    if (n == 0) return outcomes;
+
+    // GPL: per-desc creation. The shared-library cache already amortizes the
+    // expensive stage libraries across the batch, and the final link carries
+    // its own FAIL_ON + no-FAIL_ON + monolithic fallback ladder per desc.
+    // Batched final links are the compiler's later refinement.
+    const bool use_gpl = gpl_available_ && !gpl_runtime_disabled_.load(std::memory_order_relaxed);
+    if (use_gpl) {
+        for (std::size_t i = 0; i < n; ++i) {
+            try {
+                outcomes[i] = CreateGraphics(descs[i], shaders);
+            } catch (const PipelineCreationError& e) {
+                outcomes[i] = std::unexpected(e.error);
+            } catch (const vk::SystemError& e) {
+                const auto result = static_cast<vk::Result>(e.code().value());
+                outcomes[i] = std::unexpected(PipelineError{
+                    PipelineErrorKind::DriverRejectedPipeline, result,
+                    std::format("{} ({})", e.what(), vk::to_string(result))});
+            }
+        }
+        return outcomes;
+    }
+
+    // Monolithic batch: fetch modules per desc, build one staging entry and
+    // create-info per desc, then a single vkCreateGraphicsPipelines call.
+    struct StagingEntry {
+        MonolithicStaging st{};
+        std::optional<vk::ShaderModule> vert_mod;
+        std::optional<vk::ShaderModule> frag_mod;
+    };
+    std::vector<StagingEntry> staging(n);
+    std::vector<vk::GraphicsPipelineCreateInfo> infos;
+    infos.reserve(n);
+    std::vector<std::size_t> batched;
+    for (std::size_t i = 0; i < n; ++i) {
+        const auto& desc = descs[i];
+        try {
+            staging[i].vert_mod = FetchModule(shaders, desc.vertex_shader);
+            staging[i].frag_mod = FetchModule(shaders, desc.fragment_shader);
+        } catch (const PipelineCreationError& e) {
+            outcomes[i] = std::unexpected(e.error);
+            continue;
+        }
+        BindColorBlendAttachments(desc);
+        infos.push_back(BuildMonolithicCI(desc, *staging[i].vert_mod,
+                                          *staging[i].frag_mod, staging[i].st));
+        batched.push_back(i);
+    }
+
+    if (!infos.empty()) {
+        std::vector<std::size_t> retry;
+        try {
+            auto pipelines =
+                device_.createGraphicsPipelines(cache_, infos, nullptr);
+            const std::size_t count = std::min(pipelines.size(), infos.size());
+            for (std::size_t j = 0; j < count; ++j) {
+                const std::size_t di = batched[j];
+                if (*pipelines[j]) {
+                    outcomes[di] =
+                        PipelineProduct::Monolithic(std::move(pipelines[j]));
+                    LOGIFACE_LOG(debug, std::format("PipelineFactory: batched monolithic "
+                                                    "pipeline created: 0x{:x}",
+                                                    HandleToU64(*pipelines[j])));
+                } else {
+                    retry.push_back(di);
+                }
+            }
+            for (std::size_t j = count; j < infos.size(); ++j) {
+                retry.push_back(batched[j]);
+            }
+        } catch (const vk::SystemError& e) {
+            LOGIFACE_LOG(debug, std::format("PipelineFactory: batched monolithic creation "
+                                            "threw ({}) — re-creating the batch one by one for "
+                                            "per-desc error attribution", e.what()));
+            retry = batched;
+        }
+        for (const std::size_t di : retry) {
+            if (outcomes[di]) continue;
+            try {
+                outcomes[di] = CreateGraphicsMonolithic(descs[di], shaders);
+            } catch (const PipelineCreationError& e) {
+                outcomes[di] = std::unexpected(e.error);
+            } catch (const vk::SystemError& e) {
+                const auto result = static_cast<vk::Result>(e.code().value());
+                outcomes[di] = std::unexpected(PipelineError{
+                    PipelineErrorKind::DriverRejectedPipeline, result,
+                    std::format("{} ({}) [{}]", e.what(), vk::to_string(result),
+                                Describe(descs[di]))});
+            }
+        }
+    }
+    return outcomes;
 }
 
 } // namespace VulkanEngine::ShaderSystem

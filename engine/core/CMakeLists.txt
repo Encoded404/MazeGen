@@ -412,6 +412,7 @@ if(CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
             render/GpuStats.cppm
             render/PipelineFactory.cppm
             render/PipelineTemplates.cppm
+            render/PipelineCompiler.cppm
             render/ShaderWatcher.cppm
             render/ShaderRegistration.cppm
             GameEngine.cppm

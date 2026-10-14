@@ -166,6 +166,32 @@ public:
         CreateCompute(const ComputePipelineDesc& desc,
                       ShaderManager& shaders) const;
 
+    // ── Batched creation (PipelineCompiler submission window) ──
+    //
+    // One driver call per batch (vkCreateComputePipelines /
+    // vkCreateGraphicsPipelines with N infos) so the driver can fan the
+    // compilations out across its own workers. Element i of the returned
+    // vector is the outcome for descs[i].
+    //
+    // BATCH FAILURE SHAPE (verified against the vcpkg-built headers, see the
+    // CreateGraphicsGPLFinalLink note): the raii vector form discards the
+    // outer result and wraps EVERY raw handle the driver wrote into the
+    // out-array, including VK_NULL_HANDLE for individually failed elements.
+    // Every batch method therefore detects null-handle entries and re-creates
+    // exactly those descs through the single-desc path, so failures surface as
+    // per-element PipelineErrors with normal attribution instead of wrapping a
+    // null handle.
+    [[nodiscard]] std::vector<std::expected<PipelineProduct, PipelineError>>
+        CreateComputeBatch(std::span<const ComputePipelineDesc> descs,
+                           ShaderManager& shaders) const;
+
+    // Monolithic path: one batched vkCreateGraphicsPipelines call. GPL path:
+    // per-desc CreateGraphics (library dedupe already amortizes the GPL work;
+    // batched final links are the compiler's later refinement).
+    [[nodiscard]] std::vector<std::expected<PipelineProduct, PipelineError>>
+        CreateGraphicsBatch(std::span<const GraphicsPipelineDesc> descs,
+                            ShaderManager& shaders) const;
+
     [[nodiscard]] bool IsGPLAvailable() const { return gpl_available_; }
     [[nodiscard]] bool IsGPLDisabledAtRuntime() const {
         return gpl_runtime_disabled_.load(std::memory_order_relaxed);

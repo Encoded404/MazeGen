@@ -24,6 +24,7 @@ add_executable(engine_tests
   texture_watcher_tests.cpp
   gpl_resolution_tests.cpp
   pipeline_template_tests.cpp
+  pipeline_compiler_tests.cpp
   tlsf_allocator_tests.cpp
   transient_allocator_tests.cpp
   render_pipeline_resolution_tests.cpp
