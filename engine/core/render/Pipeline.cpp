@@ -14,6 +14,8 @@ import VulkanEngine.RenderGraph;
 import VulkanBackend.Vulkan.RenderGraphExecutor;
 import VulkanBackend.Vulkan.VulkanBootstrap;
 import VulkanBackend.Vulkan.VulkanDebugUtils;
+import VulkanEngine.PipelineCompiler;
+import VulkanEngine.PipelineFactory;
 
 namespace VulkanEngine::RenderPipeline {
 
@@ -734,6 +736,11 @@ void RenderPipeline::BuildPassPipelines() {
     }
     auto& device = bootstrap_->GetBackend().GetDevice();
 
+    // All pass pipelines compile in one batched submission at the end of this
+    // function; the per-pass sections below only build layouts and descs.
+    ShaderSystem::PipelineFactoryExecutor executor{*pipeline_factory_};
+    ShaderSystem::PipelineCompiler compiler{executor};
+
     for (auto& [index, state] : pass_pipelines_) {
         (void)index;
         if (!state.request.IsDeclared() || state.built) {
@@ -876,14 +883,18 @@ void RenderPipeline::BuildPassPipelines() {
                 .shader = static_cast<ShaderSystem::ShaderId>(state.request.compute_shader),
                 .layout = *state.layout,
             };
-            if (auto product = pipeline_factory_->CreateCompute(state.compute_desc, *shader_manager_);
-                product.has_value()) {
-                state.slot.Swap(std::move(*product), 0);
-                state.built = true;
-            } else {
-                LOGIFACE_LOG(error, "RenderPipeline: compute pipeline creation failed for pass '" +
-                                        state.name + "': " + product.error().message);
-            }
+            auto& st = state;
+            compiler.SubmitCompute(
+                state.compute_desc, st.name,
+                [&st](ShaderSystem::PipelineOutcome&& outcome) {
+                    if (!outcome.has_value()) {
+                        LOGIFACE_LOG(error, "RenderPipeline: compute pipeline creation failed for pass '" +
+                                                st.name + "': " + outcome.error().message);
+                        return;
+                    }
+                    st.slot.Swap(std::move(*outcome), 0);
+                    st.built = true;
+                });
         } else if (state.request.kind == VulkanEngine::PipelinePass::PassPipelineKind::Graphics) {
             // Blend comes from the pass's declaration (a straight-alpha
             // source-over is the default when it enables blending); an
@@ -926,16 +937,25 @@ void RenderPipeline::BuildPassPipelines() {
             state.graphics_desc.color_blend_attachments = {blend_attachment};
             state.graphics_desc.dynamic_states = {vk::DynamicState::eViewport, vk::DynamicState::eScissor};
 
-            if (auto product = pipeline_factory_->CreateGraphics(state.graphics_desc, *shader_manager_);
-                product.has_value()) {
-                state.slot.Swap(std::move(*product), 0);
-                state.built = true;
-            } else {
-                LOGIFACE_LOG(error, "RenderPipeline: graphics pipeline creation failed for pass '" +
-                                        state.name + "': " + product.error().message);
-            }
+            auto& st = state;
+            compiler.SubmitGraphics(
+                state.graphics_desc, st.name,
+                [&st](ShaderSystem::PipelineOutcome&& outcome) {
+                    if (!outcome.has_value()) {
+                        LOGIFACE_LOG(error, "RenderPipeline: graphics pipeline creation failed for pass '" +
+                                                st.name + "': " + outcome.error().message);
+                        return;
+                    }
+                    st.slot.Swap(std::move(*outcome), 0);
+                    st.built = true;
+                });
         }
     }
+
+    // One batched driver call per kind for the whole pass set (compute and,
+    // on the monolithic path, graphics). Per-pass failures log and leave the
+    // pass unbuilt exactly as the per-pass creations did.
+    compiler.Flush(*shader_manager_);
 }
 
 vk::Format RenderPipeline::ResolveResourceFormat(
