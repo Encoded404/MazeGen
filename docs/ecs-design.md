@@ -126,9 +126,9 @@ flight.
 ## Systems and the fixed-step order
 
 Data components have no `Update`, so they need an ordered place to run.
-`GameEngine::AddSystem(name, fn)` registers a
+`GameEngine::AddSystem` registers a
 `SystemSchedule::SystemFn = void(ComponentRegistry&, float delta_time)`; systems
-run in registration order once per fixed step. `GameEngine::FixedUpdate` orders
+run once per fixed step. `GameEngine::FixedUpdate` orders
 the whole step as:
 
 1. `ApplyStructuralChanges()` — drain what the previous step queued,
@@ -138,6 +138,36 @@ the whole step as:
 
 Object components therefore keep driving themselves, and data systems get a
 deterministic order relative to them and to each other.
+
+### System identity is never a string
+
+Registration order is the default order, and a system may constrain itself
+relative to one that is already registered (`AddSystemAfter` / `AddSystemBefore`
+on `GameEngine`, `AddAfter` / `AddBefore` on `SystemSchedule`). The target is an
+identity, not a name:
+
+- An engine-owned system the frame contract names registers against a
+  `SystemSlot` enumerator (`PhysicsInput`, `PhysicsSimulate`,
+  `PhysicsWriteBack`, …). The enumerator *is* the identity, so renaming or
+  mistyping one is a compile error, and engine and game code agree on the
+  spelling without sharing a string. `SystemSlotName` is the diagnostic
+  spelling used in messages, not a key.
+- A system a module or a game registers for itself gets an opaque `SystemId`
+  back — schedule instance tag plus registration index and schedule generation,
+  generation-checked like `EntityId` — and constraints reference that handle. A
+  handle taken before `Clear()`, or one taken from a different schedule, is
+  rejected rather than silently resolving to another system.
+- The optional `label` passed to registration is diagnostics only: it appears in
+  failure messages, never in resolution, and must have static storage duration
+  (pass a string literal).
+
+Resolution runs once per registration, never per frame: among systems whose
+constraints are already satisfied, the earliest-registered one runs first, so
+unconstrained systems keep registration order. A constraint naming something
+unregistered, stale, or foreign throws at registration time and leaves the
+schedule untouched. Each registration carries at most one constraint edge, so a
+cycle cannot be stated; the resolver asserts acyclicity anyway rather than
+trusting it.
 
 ## Why not archetypes
 

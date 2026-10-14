@@ -131,11 +131,32 @@ public:
     // data-component systems in registration order, dispatch object-component
     // Update, then apply structural changes queued during those phases.
     //
-    // AddSystem is where data-component systems get an ordered home. Object
-    // components keep driving themselves through Component::Update.
+    // Where data-component systems get an ordered home. Object components keep
+    // driving themselves through Component::Update.
+    //
+    // Constraints are by identity, never by name: a system the frame contract
+    // names registers against a SystemSlot enumerator (so a rename is a compile
+    // error), and anything registered for itself gets an opaque SystemId back to
+    // constrain against. `label` is diagnostics only and must be a string
+    // literal. See SystemSchedule for the ordering contract.
     using SystemFn = VulkanEngine::SystemSchedule::SystemFn;
-    void AddSystem(std::string name, SystemFn fn) {
-        systems_.Add(std::move(name), std::move(fn));
+    SystemId AddSystem(SystemFn fn, std::string_view label = {}) {
+        return systems_.Add(std::move(fn), label);
+    }
+    SystemId AddSystem(SystemSlot slot, SystemFn fn, std::string_view label = {}) {
+        return systems_.Add(slot, std::move(fn), label);
+    }
+    SystemId AddSystemAfter(SystemRef after, SystemFn fn, std::string_view label = {}) {
+        return systems_.AddAfter(after, std::move(fn), label);
+    }
+    SystemId AddSystemAfter(SystemRef after, SystemSlot slot, SystemFn fn, std::string_view label = {}) {
+        return systems_.AddAfter(after, slot, std::move(fn), label);
+    }
+    SystemId AddSystemBefore(SystemRef before, SystemFn fn, std::string_view label = {}) {
+        return systems_.AddBefore(before, std::move(fn), label);
+    }
+    SystemId AddSystemBefore(SystemRef before, SystemSlot slot, SystemFn fn, std::string_view label = {}) {
+        return systems_.AddBefore(before, slot, std::move(fn), label);
     }
     void FixedUpdate(const VulkanEngine::Application::ApplicationContext& ctx);
     // Everything that must happen exactly once per rendered frame: the text
