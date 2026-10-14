@@ -231,28 +231,36 @@ bool BaseTechnique::Compile(VulkanBackend::Vulkan::VulkanBootstrap& bootstrap,
     {
         pipeline_config_ = config;
 
-        ShaderSystem::GraphicsPipelineDesc base{};
-        base.color_blend_attachments = {vk::PipelineColorBlendAttachmentState(
-            config.blend_enable,
-            config.src_color_blend_factor, config.dst_color_blend_factor, config.color_blend_op,
-            config.src_alpha_blend_factor, config.dst_alpha_blend_factor, config.alpha_blend_op,
-            vk::ColorComponentFlagBits::eR | vk::ColorComponentFlagBits::eG | vk::ColorComponentFlagBits::eB | vk::ColorComponentFlagBits::eA)};
-
-        base.vertex_shader = vert_id;
-        base.fragment_shader = frag_id;
-        base.vertex_input = vk::PipelineVertexInputStateCreateInfo({}, 0, nullptr, 0, nullptr);
-        base.input_assembly = vk::PipelineInputAssemblyStateCreateInfo({}, config.primitive_topology);
-        base.viewport = vk::PipelineViewportStateCreateInfo({}, 1, nullptr, 1, nullptr);
-        base.rasterization = vk::PipelineRasterizationStateCreateInfo({}, false, false, config.polygon_mode, config.cull_mode, config.front_face, false, 0, 0, 0, config.line_width);
-        base.multisample = vk::PipelineMultisampleStateCreateInfo({}, config.sample_count);
-        base.depth_stencil = vk::PipelineDepthStencilStateCreateInfo({}, config.depth_test_enable, config.depth_write_enable, config.depth_compare_op);
+        // Fixed-state assembly comes from the shared builder (single copy of
+        // the "pull-mode vertices + dynamic viewport/scissor + vertex-stage-
+        // only spec constant" knowledge, shared with the scene pipelines).
+        const std::array<vk::Format, 1> surface_formats{
+            bootstrap.GetBackend().GetSurfaceFormat().format};
+        ShaderSystem::GraphicsPipelineTemplate base_tmpl{
+            .debug_name = "base-technique",
+            .input_assembly = vk::PipelineInputAssemblyStateCreateInfo(
+                {}, config.primitive_topology),
+            .rasterization = vk::PipelineRasterizationStateCreateInfo(
+                {}, false, false, config.polygon_mode, config.cull_mode,
+                config.front_face, false, 0, 0, 0, config.line_width),
+            .multisample = vk::PipelineMultisampleStateCreateInfo(
+                {}, config.sample_count),
+            .depth_stencil = vk::PipelineDepthStencilStateCreateInfo(
+                {}, config.depth_test_enable, config.depth_write_enable,
+                config.depth_compare_op),
+            .blend_attachments = {vk::PipelineColorBlendAttachmentState(
+                config.blend_enable,
+                config.src_color_blend_factor, config.dst_color_blend_factor,
+                config.color_blend_op, config.src_alpha_blend_factor,
+                config.dst_alpha_blend_factor, config.alpha_blend_op,
+                vk::ColorComponentFlagBits::eR | vk::ColorComponentFlagBits::eG |
+                vk::ColorComponentFlagBits::eB | vk::ColorComponentFlagBits::eA)},
+        };
         // Attachment pointer/count are rebound by PipelineFactory from the
         // desc's owned color_blend_attachments vector; do not borrow a member.
-        base.color_blend = vk::PipelineColorBlendStateCreateInfo({}, false, vk::LogicOp::eCopy, 0, nullptr);
-        base.dynamic_states = { vk::DynamicState::eViewport, vk::DynamicState::eScissor };
-        base.layout = *pipeline_layout_;
-        base.color_formats = { bootstrap.GetBackend().GetSurfaceFormat().format };
-        base.depth_format = bootstrap.GetBackend().GetDepthFormat();
+        ShaderSystem::GraphicsPipelineDesc base = ShaderSystem::MakeGraphicsDesc(
+            base_tmpl, vert_id, frag_id, *pipeline_layout_,
+            surface_formats, bootstrap.GetBackend().GetDepthFormat());
 
         // Vertex-stage draw-mode specialization (constant_id 0). main_indir and
         // depth_indir read it to select the addressing path. Applied to the
