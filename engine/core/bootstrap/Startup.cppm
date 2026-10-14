@@ -23,7 +23,7 @@ namespace {
 // crash report reads exactly like the terminal output around it. Formatting
 // only happens per emitted record (after the level gate), never per frame.
 struct TeeLogger : public Logiface::Logger {
-    Logiface::ConsoleLogger console{};
+    Logiface::ConsoleLogger console{Logiface::Level::info, std::cout, std::cerr};
     std::mutex mutex{};
 
     void Log(const Logiface::Record& record) override {
