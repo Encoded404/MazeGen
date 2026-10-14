@@ -85,7 +85,7 @@ struct GraphicsPipelineTemplate {
     desc.shader = shader;
     desc.entry_point = tmpl.entry_point;
     desc.layout = layout;
-    assert(shader != 0); // ShaderId 0 is the invalid sentinel
+    assert(shader != kInvalidShaderId); // ids are sequential from 0; -1 is "none"
     return desc;
 }
 
@@ -100,8 +100,8 @@ struct GraphicsPipelineTemplate {
     std::span<const vk::Format> color_formats,
     vk::Format depth_format,
     vk::Format stencil_format = vk::Format::eUndefined) {
-    assert(vertex_shader != 0);   // ShaderId 0 is the invalid sentinel
-    assert(fragment_shader != 0);
+    assert(vertex_shader != kInvalidShaderId &&
+           fragment_shader != kInvalidShaderId);
     GraphicsPipelineDesc desc{};
     desc.vertex_shader = vertex_shader;
     desc.fragment_shader = fragment_shader;

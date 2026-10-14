@@ -14,12 +14,14 @@ namespace {
 
 using namespace VulkanEngine::ShaderSystem;
 
-// ShaderId is a plain uint16 alias with 0 as the invalid sentinel (see
-// ShaderManager.cppm). Tests use nonzero ids; the builders only assert on
-// validity, they never touch a device.
+// ShaderId is a plain uint16 alias; Register hands out ids sequentially
+// starting at 0 and kInvalidShaderId (-1) is the "no shader" sentinel (see
+// ShaderManager.cppm). The builders only assert on the sentinel; they never
+// touch a device.
 constexpr ShaderId kVert = 11;
 constexpr ShaderId kFrag = 12;
 constexpr ShaderId kComp = 13;
+static_assert(kVert != kInvalidShaderId && kComp != kInvalidShaderId);
 
 vk::PipelineLayout NullLayout() {
     return vk::PipelineLayout{}; // null handle, no device needed

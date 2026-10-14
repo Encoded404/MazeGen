@@ -11,6 +11,12 @@ export namespace VulkanEngine::ShaderSystem {
 
 using ShaderId = std::uint16_t;
 
+// The invalid-shader sentinel. Register hands out sequential ids starting at
+// 0, so id 0 is a perfectly valid (and typical) first shader — never treat 0
+// as "no shader". PollAndRebuild's single-shader overload uses the same
+// sentinel.
+inline constexpr ShaderId kInvalidShaderId = static_cast<ShaderId>(-1);
+
 struct ShaderModuleSlot {
     std::string spv_path;
     std::string slang_path;
