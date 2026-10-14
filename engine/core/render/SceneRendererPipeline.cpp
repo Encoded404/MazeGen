@@ -14,6 +14,8 @@ import logiface;
 import vulkan;
 
 import VulkanBackend.Vulkan.VulkanDebugUtils;
+import VulkanEngine.PipelineFactory;
+import VulkanEngine.PipelineTemplates;
 
 namespace VulkanEngine::SceneRenderer {
     namespace {
@@ -26,21 +28,11 @@ namespace VulkanEngine::SceneRenderer {
         struct OccluderSelectPC { std::uint32_t cnt; std::uint32_t minAreaPx; std::uint32_t screenW; std::uint32_t screenH; };
         struct PreCullPC { std::uint32_t cnt; std::uint32_t hizW; std::uint32_t hizH; std::uint32_t p0; glm::vec4 projInfo; };
 
-        // kCompactionMode specialization constant (constant_id 0):
-        //   0 = CID (4 B compact index copies)
-        //   1 = MID (20 B DrawIndexedIndirectCommand emission)
-        // Applied to both compute pipelines and the vertex-stage graphics
-        // pipelines (draw-mode-specialized vertex shaders).
-        template <typename Desc>
-        void SetDrawModeSpec(Desc& desc, DrawMode mode) {
-            const std::uint32_t value =
-                (mode == DrawMode::MID) ? 1u : 0u;
-            desc.spec_entries = {
-                vk::SpecializationMapEntry(0, 0, sizeof(std::uint32_t))
-            };
-            desc.spec_data.resize(sizeof(std::uint32_t));
-            std::memcpy(desc.spec_data.data(), &value, sizeof(value));
-        }
+        // The draw-mode spec writer lives in VulkanEngine.PipelineTemplates
+        // (single copy shared with the technique system): ApplyDrawModeSpec
+        // (constant_id 0, 0 = CID, 1 = MID) + DrawModeSpecValue. Applied to
+        // both compute pipelines and the vertex stage of graphics pipelines
+        // (draw-mode-specialized vertex shaders).
     } // anonymous namespace
 
 bool SceneRenderer::CreateExpandPipeline(const VulkanBackend::Vulkan::IVulkanBootstrap& be,
@@ -64,7 +56,7 @@ bool SceneRenderer::CreateExpandPipeline(const VulkanBackend::Vulkan::IVulkanBoo
     ShaderSystem::ComputePipelineDesc desc{};
     desc.shader = shader_id;
     desc.layout = *expand_pipeline_layout_;
-    SetDrawModeSpec(desc, draw_mode_);
+    ApplyDrawModeSpec(desc, ShaderSystem::DrawModeSpecValue(draw_mode_));
     expand_desc_ = desc;
     auto result = pipeline_factory.CreateCompute(desc, shader_mgr);
     if (result.has_value()) {
@@ -106,7 +98,7 @@ bool SceneRenderer::CreateDepthPipeline(VulkanBackend::Vulkan::IVulkanBootstrap&
     desc.dynamic_states = { vk::DynamicState::eViewport, vk::DynamicState::eScissor };
     desc.layout = *depth_pipeline_layout_;
     desc.depth_format = be.GetDepthFormat();
-    SetDrawModeSpec(desc, draw_mode_);
+    ApplyDrawModeSpec(desc, ShaderSystem::DrawModeSpecValue(draw_mode_));
     depth_desc_ = desc;
 
     auto result = pipeline_factory.CreateGraphics(desc, shader_mgr);
@@ -219,7 +211,7 @@ bool SceneRenderer::CreateOccluderSelectPipeline(const VulkanBackend::Vulkan::IV
     ShaderSystem::ComputePipelineDesc desc{};
     desc.shader = shader_id;
     desc.layout = *occluder_select_pipeline_layout_;
-    SetDrawModeSpec(desc, draw_mode_);
+    ApplyDrawModeSpec(desc, ShaderSystem::DrawModeSpecValue(draw_mode_));
     occluder_select_desc_ = desc;
     auto result = pipeline_factory.CreateCompute(desc, shader_mgr);
     if (result.has_value()) {
@@ -250,7 +242,7 @@ bool SceneRenderer::CreatePreCullPipeline(const VulkanBackend::Vulkan::IVulkanBo
     ShaderSystem::ComputePipelineDesc desc{};
     desc.shader = shader_id;
     desc.layout = *pre_cull_pipeline_layout_;
-    SetDrawModeSpec(desc, draw_mode_);
+    ApplyDrawModeSpec(desc, ShaderSystem::DrawModeSpecValue(draw_mode_));
     pre_cull_desc_ = desc;
     auto result = pipeline_factory.CreateCompute(desc, shader_mgr);
     if (result.has_value()) {
@@ -284,7 +276,7 @@ bool SceneRenderer::CreateCollectPipelines(const VulkanBackend::Vulkan::IVulkanB
         ShaderSystem::ComputePipelineDesc desc{};
         desc.shader = count_id;
         desc.layout = *collect_pipeline_layout_;
-        SetDrawModeSpec(desc, draw_mode_);
+        ApplyDrawModeSpec(desc, ShaderSystem::DrawModeSpecValue(draw_mode_));
         collect_count_desc_ = desc;
         auto result = pipeline_factory.CreateCompute(desc, shader_mgr);
         if (result.has_value()) {
@@ -348,11 +340,11 @@ bool SceneRenderer::RebuildCompactionPipelines() {
         return true;
     };
 
-    if (expand_desc_)         SetDrawModeSpec(*expand_desc_, draw_mode_);
-    if (occluder_select_desc_) SetDrawModeSpec(*occluder_select_desc_, draw_mode_);
-    if (pre_cull_desc_)       SetDrawModeSpec(*pre_cull_desc_, draw_mode_);
-    if (collect_count_desc_)  SetDrawModeSpec(*collect_count_desc_, draw_mode_);
-    if (depth_desc_)          SetDrawModeSpec(*depth_desc_, draw_mode_);
+    if (expand_desc_)         ApplyDrawModeSpec(*expand_desc_, ShaderSystem::DrawModeSpecValue(draw_mode_));
+    if (occluder_select_desc_) ApplyDrawModeSpec(*occluder_select_desc_, ShaderSystem::DrawModeSpecValue(draw_mode_));
+    if (pre_cull_desc_)       ApplyDrawModeSpec(*pre_cull_desc_, ShaderSystem::DrawModeSpecValue(draw_mode_));
+    if (collect_count_desc_)  ApplyDrawModeSpec(*collect_count_desc_, ShaderSystem::DrawModeSpecValue(draw_mode_));
+    if (depth_desc_)          ApplyDrawModeSpec(*depth_desc_, ShaderSystem::DrawModeSpecValue(draw_mode_));
     // collect_write is CID-only and has no specialization constant.
 
     bool ok = true;

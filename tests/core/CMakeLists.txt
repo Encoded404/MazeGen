@@ -23,6 +23,7 @@ add_executable(engine_tests
   material_slot_rewrite_tests.cpp
   texture_watcher_tests.cpp
   gpl_resolution_tests.cpp
+  pipeline_template_tests.cpp
   tlsf_allocator_tests.cpp
   transient_allocator_tests.cpp
   render_pipeline_resolution_tests.cpp

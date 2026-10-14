@@ -19,6 +19,7 @@ import VulkanEngine.GpuResources.BlockArray;
 import VulkanEngine.GpuBuffer;
 import VulkanEngine.GpuResources.StagingPool;
 import VulkanEngine.PipelineFactory;
+import VulkanEngine.PipelineTemplates;
 import VulkanEngine.ShaderManager;
 
 namespace {
@@ -29,17 +30,10 @@ namespace {
         return reinterpret_cast<std::uint64_t>(static_cast<typename Handle::CType>(h));
     }
 
-    // Draw-mode specialization (constant_id 0): 0 = CID, 1 = MID. The
-    // vertex shader (main_indir) reads it to select its addressing path. One
-    // writer keeps Compile and the runtime draw-mode switch identical.
-    void SetDrawModeSpec(VulkanEngine::ShaderSystem::GraphicsPipelineDesc& desc,
-                         std::uint32_t draw_mode) {
-        desc.spec_entries = {
-            vk::SpecializationMapEntry(0, 0, sizeof(std::uint32_t))
-        };
-        desc.spec_data.resize(sizeof(std::uint32_t));
-        std::memcpy(desc.spec_data.data(), &draw_mode, sizeof(draw_mode));
-    }
+    // The draw-mode spec writer lives in VulkanEngine.PipelineTemplates
+    // (single copy shared with the scene renderer): ApplyDrawModeSpec
+    // (constant_id 0, 0 = CID, 1 = MID). One writer keeps Compile and the
+    // runtime draw-mode switch identical.
 }
 
 namespace VulkanEngine::TechniqueManager {
@@ -263,7 +257,7 @@ bool BaseTechnique::Compile(VulkanBackend::Vulkan::VulkanBootstrap& bootstrap,
         // Vertex-stage draw-mode specialization (constant_id 0). main_indir and
         // depth_indir read it to select the addressing path. Applied to the
         // vertex stage only; the fragment shader does not declare it.
-        SetDrawModeSpec(base, config.draw_mode);
+        ApplyDrawModeSpec(base, config.draw_mode);
 
         auto result = pipeline_factory.CreateGraphics(base, shader_mgr);
         if (!result.has_value()) {
@@ -569,7 +563,7 @@ bool BaseTechnique::RebuildForDrawMode(ShaderSystem::ShaderManager& shaders,
     bool ok = true;
     for (auto& variant : variants_) {
         variant.slot.RetireFrame(frame_index);
-        SetDrawModeSpec(variant.desc, draw_mode);
+        ApplyDrawModeSpec(variant.desc, draw_mode);
         auto result = factory.CreateGraphics(variant.desc, shaders);
         if (!result.has_value()) {
             LOGIFACE_LOG(error, std::format(
