@@ -26,6 +26,12 @@ import FileLoader.Types;
 import VulkanEngine.Text.FontReloader;
 import VulkanBackend.Vulkan.VulkanBootstrap;
 
+#ifdef VKENGINE_PHYSICS
+import VulkanEngine.Physics.World;
+import VulkanEngine.Physics.BodyBridge;
+import VulkanEngine.Physics.Character;
+#endif
+
 namespace VulkanEngine {
 
 namespace {
@@ -88,6 +94,107 @@ bool GameEngine::Setup(VulkanEngine::Application::ApplicationContext& ctx, const
     if (!bootstrap_.Initialize(ctx_, config_, *ctx.bootstrap)) {
         return false;
     }
+
+#ifdef VKENGINE_PHYSICS
+    // Physics is constructed here rather than in EngineBootstrap because its
+    // frame contract is expressed against the ECS schedule and the registry's
+    // add/remove hooks, which are GameEngine state. The world itself touches no
+    // Vulkan object, so its lifetime only has to bracket the systems that call
+    // it.
+    ctx_.physics_world = std::make_unique<Physics::World>();
+    {
+        // The disk half of the cooked-shape cache is off unless the host names a
+        // directory: an empty `physics_shape_cache_dir` is the "cook everything"
+        // default, so an engine that was never told where caches live never
+        // writes one. The blobs are keyed by Jolt version and shape hash, so a
+        // stale or corrupt file is a miss that re-cooks, never a load failure.
+        Physics::PhysicsWorldConfig physics_config{};
+        physics_config.shape_cache_directory = config_.physics_shape_cache_dir;
+        if (!ctx_.physics_world->Initialize(physics_config)) {
+            LOGIFACE_LOG(error, "physics: world initialization failed");
+            ctx_.physics_world.reset();
+            return false;
+        }
+    }
+
+    // The frame contract's three physics slots, stated as constraints rather than
+    // left to registration order. A gameplay system that declares itself After
+    // PhysicsSimulate reads post-step state; Before PhysicsInput reads pre-step
+    // state. The simulate body itself is one blocking Jolt update per fixed step,
+    // on the calling thread, with Jolt fanning out onto the shared compute pool.
+    systems_.Add(
+        SystemSlot::PhysicsInput,
+        [this](ComponentRegistry& registry, float delta_time) {
+            if (ctx_.physics_world) {
+                Physics::ApplyInputs(*ctx_.physics_world, registry, delta_time);
+                // Characters are swept, not solved, so they run here: before the
+                // step, and after kinematic platforms have been pushed to their
+                // new pose, which is what lets a platform carry a character.
+                Physics::StepCharacters(*ctx_.physics_world, registry, delta_time);
+            }
+        },
+        "physics.input");
+    systems_.AddAfter(
+        SystemSlot::PhysicsInput, SystemSlot::PhysicsSimulate,
+        [this](ComponentRegistry& /*registry*/, float /*delta_time*/) {
+            if (ctx_.physics_world) ctx_.physics_world->Step();
+        },
+        "physics.simulate");
+    systems_.AddAfter(
+        SystemSlot::PhysicsSimulate, SystemSlot::PhysicsWriteBack,
+        [this](ComponentRegistry& registry, float delta_time) {
+            if (ctx_.physics_world) {
+                Physics::WriteBack(*ctx_.physics_world, registry, delta_time);
+            }
+        },
+        "physics.writeback");
+
+    // Bodies are owned by the world but created from components, so the
+    // registry's add/remove hooks are the attachment seam (the same pattern
+    // DynamicMesh uses for its GPU allocation). The hook body receives the
+    // component by reference: the registry is still inside the add when the hook
+    // fires, so the component's mask bit is not set yet and a lookup by type
+    // would find nothing.
+    ctx_.component_registry.OnAdd<Physics::RigidBody>(
+        [this](Entity& entity, Physics::RigidBody& body) {
+            if (ctx_.physics_world) Physics::AttachBody(*ctx_.physics_world, entity, body);
+        });
+    ctx_.component_registry.OnRemove<Physics::RigidBody>(
+        [this](Entity& /*entity*/, Physics::RigidBody& body) {
+            if (ctx_.physics_world) Physics::DetachBody(*ctx_.physics_world, body);
+        });
+
+    ctx_.component_registry.OnAdd<Physics::Character>(
+        [this](Entity& entity, Physics::Character& character) {
+            if (ctx_.physics_world) Physics::AttachCharacter(*ctx_.physics_world, entity, character);
+        });
+    ctx_.component_registry.OnRemove<Physics::Character>(
+        [this](Entity& /*entity*/, Physics::Character& character) {
+            if (ctx_.physics_world) Physics::DetachCharacter(*ctx_.physics_world, character);
+        });
+
+    // A collider change means a new shape set, and Jolt shapes are immutable once
+    // a body owns them, so the body is rebuilt at its live pose. This makes the
+    // add order irrelevant: adding the children before or after the RigidBody
+    // produces the same compound body.
+    ctx_.component_registry.OnAdd<Physics::Collider>(
+        [this](Entity& entity, Physics::Collider& collider) {
+            if (!ctx_.physics_world) return;
+            if (auto* body = entity.GetComponent<Physics::RigidBody>()) {
+                Physics::RebuildBody(*ctx_.physics_world, entity, *body, collider.children);
+            }
+        });
+    // On removal the children are gone by definition, so the body goes back to
+    // its single shape. The component still reads correctly here (the hook runs
+    // before the mask bit is cleared), so its size is what tells us it was empty.
+    ctx_.component_registry.OnRemove<Physics::Collider>(
+        [this](Entity& entity, Physics::Collider& /*collider*/) {
+            if (!ctx_.physics_world) return;
+            if (auto* body = entity.GetComponent<Physics::RigidBody>()) {
+                Physics::RebuildBody(*ctx_.physics_world, entity, *body, {});
+            }
+        });
+#endif
 
     // Release a DynamicMesh entity's streamed GPU allocation when the component
     // is removed or its entity is destroyed. Data components carry no destructor
@@ -784,6 +891,19 @@ void GameEngine::FrameRender(const VulkanEngine::Application::ApplicationContext
 
 void GameEngine::Shutdown() {
     if (!initialized_) return;
+
+#ifdef VKENGINE_PHYSICS
+    // Shut the physics world down before the device teardown so no simulation
+    // step can run against a half-destroyed engine. The world owns no Vulkan
+    // object, but the systems that call it live in this engine's schedule.
+    if (ctx_.physics_world) {
+        LOGIFACE_LOG(debug, std::format("physics: {} fixed steps, {} bodies",
+                                        ctx_.physics_world->StepCount(),
+                                        ctx_.physics_world->BodyCount()));
+        ctx_.physics_world->Shutdown();
+        ctx_.physics_world.reset();
+    }
+#endif
 
     if (vk_backend_) {
         bootstrap_.Shutdown(ctx_, *vk_backend_);

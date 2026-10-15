@@ -25,6 +25,14 @@ patch_fastgltf_submodule(
 set(FASTGLTF_COMPILE_AS_CPP20 ON CACHE BOOL "")
 set(FASTGLTF_ENABLE_CPP_MODULES ON CACHE BOOL "")
 set(FASTGLTF_USE_STD_MODULE ON CACHE BOOL "")
+# KHR_physics_rigid_bodies: fastgltf ships typed support for the extension but
+# leaves it off by default. Enabling it is what lets the scene importer read
+# collider hints into engine `ShapeDesc`s instead of hand-parsing extension JSON.
+# fastgltf exports the flag PUBLIC, so the importer's translation units see the
+# physics types. FORCE because the engine's importer *requires* the types: a tree
+# whose cache already holds OFF (every tree configured before this line existed)
+# would otherwise keep compiling without them and fail to build the importer.
+set(FASTGLTF_ENABLE_KHR_PHYSICS_RIGID_BODIES ON CACHE BOOL "Engine physics import depends on it" FORCE)
 add_subdirectory(${_patched_fastgltf_dir} ${CMAKE_CURRENT_BINARY_DIR}/fastgltf)
 find_package(Stb REQUIRED)
 find_package(imgui CONFIG REQUIRED)
@@ -122,6 +130,75 @@ if(VKENGINE_PHYSICAL_CAMERA)
     target_compile_definitions(${ENGINE_TARGET} PUBLIC VKENGINE_PHYSICAL_CAMERA=1)
     target_sources(${ENGINE_TARGET} PRIVATE
         physical_camera/PhysicalCameraSystem.cpp
+    )
+endif()
+
+# ── Jolt physics ────────────────────────────────────────────────────────
+# Compile-time switch mirroring VKENGINE_PHYSICAL_CAMERA: when OFF no physics
+# code is built, no Jolt symbol is referenced and the facade is absent (all uses
+# are macro-guarded). Jolt types are confined to implementation .cpp files; the
+# module interfaces above the facade never include a Jolt header.
+option(VKENGINE_PHYSICS "Enable Jolt physics support" ON)
+if(VKENGINE_PHYSICS)
+    find_package(Jolt CONFIG REQUIRED)
+
+    # Jolt's exported config puts `-pthread` (and its SIMD flags) on
+    # INTERFACE_COMPILE_OPTIONS. `-pthread` is a link-time concern for a static
+    # library, but as a *compile* flag on VulkanEngine it conflicts with the
+    # precompiled `std` module, which CMake builds without it: Clang refuses to
+    # load a std.pcm whose POSIX-thread configuration differs from the importing
+    # translation unit ("POSIX thread support was disabled in precompiled file
+    # ... but is currently enabled"). Drop just that flag from the compile line
+    # and keep it on the link line, where it arrives through the same interface.
+    get_target_property(_jolt_compile_options Jolt::Jolt INTERFACE_COMPILE_OPTIONS)
+    if(_jolt_compile_options)
+        list(REMOVE_ITEM _jolt_compile_options "-pthread")
+        set_target_properties(Jolt::Jolt PROPERTIES
+            INTERFACE_COMPILE_OPTIONS "${_jolt_compile_options}")
+    endif()
+    get_target_property(_jolt_compile_definitions Jolt::Jolt INTERFACE_COMPILE_DEFINITIONS)
+
+    target_link_libraries(${ENGINE_TARGET} PRIVATE Jolt::Jolt)
+
+    # Jolt's SIMD feature flags and JPH_* defines are part of the engine's module
+    # ABI, not just of Jolt's own translation units: VulkanEngine exports C++
+    # module BMIs, and Clang rejects a BMI whose target features differ from the
+    # importing translation unit ("precompiled file ... was compiled with the
+    # target feature '+avx2' but the current translation unit is not"). Jolt
+    # requires consumers to compile with exactly the same defines in any case, so
+    # both requirements propagate to consumers while Jolt's include path and link
+    # line stay private.
+    if(_jolt_compile_options)
+        target_compile_options(${ENGINE_TARGET} INTERFACE ${_jolt_compile_options})
+    endif()
+    if(_jolt_compile_definitions)
+        target_compile_definitions(${ENGINE_TARGET} INTERFACE ${_jolt_compile_definitions})
+    endif()
+
+    target_compile_definitions(${ENGINE_TARGET} PUBLIC VKENGINE_PHYSICS=1)
+    # Every JPH_* option stays at the vcpkg port's default. If one is ever
+    # changed, mirror the define in one commented block here so the engine and
+    # the library agree; Jolt's RegisterTypes() turns a drift into a loud
+    # failure at first run rather than a silent ABI mismatch.
+    #
+    # One port *feature* is enabled on top of the defaults: `rtti`. Jolt's
+    # documented way to integrate an engine's own scheduler is to derive from
+    # `JPH::JobSystemWithBarrier`, and a derived class compiled with RTTI emits a
+    # reference to `typeinfo for JPH::JobSystemWithBarrier`, which a `-fno-rtti`
+    # library never defines. Compiling the whole engine with `-fno-rtti` is not an
+    # option (resource storage is keyed on `typeid`), and moving the bridge into a
+    # non-module translation unit would forbid it `import std;` for the same reason.
+    # `rtti` changes only Jolt's own compile flag — it exports no consumer define
+    # and does not enable exceptions — so Jolt still never throws into engine code.
+    target_sources(${ENGINE_TARGET} PRIVATE
+        physics/PhysicsWorld.cpp
+        physics/PhysicsJobs.cpp
+        physics/PhysicsBodyBridge.cpp
+        physics/PhysicsCharacter.cpp
+        physics/PhysicsDebugOverlay.cpp
+        physics/PhysicsConstraints.cpp
+        physics/PhysicsVehicle.cpp
+        physics/PhysicsRagdoll.cpp
     )
 endif()
 
@@ -439,6 +516,23 @@ if(CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
             FILES
                 physical_camera/PhysicalCameraTypes.cppm
                 physical_camera/PhysicalCameraSystem.cppm
+        )
+    endif()
+    if(VKENGINE_PHYSICS)
+        target_sources(${ENGINE_TARGET} PUBLIC
+            FILE_SET CXX_MODULES
+            BASE_DIRS ${CMAKE_CURRENT_SOURCE_DIR}
+            FILES
+                physics/PhysicsTypes.cppm
+                physics/PhysicsEvents.cppm
+                physics/PhysicsComponents.cppm
+                physics/PhysicsWorld.cppm
+                physics/PhysicsBodyBridge.cppm
+                physics/PhysicsCharacter.cppm
+                physics/PhysicsDebugOverlay.cppm
+                physics/PhysicsConstraints.cppm
+                physics/PhysicsVehicle.cppm
+                physics/PhysicsRagdoll.cppm
         )
     endif()
     if(_gen_shader_mods)

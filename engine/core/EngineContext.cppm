@@ -40,6 +40,10 @@ import VulkanEngine.ShaderRegistration;
 import VulkanEngine.PhysicalCameraSystem;
 #endif
 
+#ifdef VKENGINE_PHYSICS
+import VulkanEngine.Physics.World;
+#endif
+
 export namespace VulkanEngine {
 
 struct GameConfig {
@@ -73,6 +77,13 @@ struct GameConfig {
     // relaunches and a user-data reset, which a path relative to the working
     // directory does not.
     std::string shader_cache_dir;
+    // Directory for the cooked collision-shape blobs (`PhysicsWorldConfig::
+    // shape_cache_directory`). Empty — the default — disables the disk cache and
+    // every shape is cooked at load. A cooked shape is a cache and never primary
+    // data: the blobs are keyed by Jolt version and shape hash, so a Jolt upgrade
+    // or a corrupt file is a miss that re-cooks, never a load failure. Point it at
+    // a per-user cache root, for the same reason as `shader_cache_dir`.
+    std::string physics_shape_cache_dir;
     VulkanEngine::ShaderSystem::GplPolicy gpl_policy = VulkanEngine::ShaderSystem::GplPolicy::Auto;
     VulkanEngine::ShaderSystem::GplStructurePolicy gpl_structure = VulkanEngine::ShaderSystem::GplStructurePolicy::Auto;
 #ifdef VKENGINE_PHYSICAL_CAMERA
@@ -154,6 +165,14 @@ struct EngineContext {
 #ifdef VKENGINE_PHYSICAL_CAMERA
     // Webcam capture + compositing (inert until a camera is opened)
     std::unique_ptr<PhysicalCamera::PhysicalCameraSystem> physical_camera;
+#endif
+
+#ifdef VKENGINE_PHYSICS
+    // The physics world (Jolt behind the Physics facade). Constructed by
+    // GameEngine::Setup, not by EngineBootstrap, because its frame contract is
+    // registered against the engine's ECS schedule. Null when physics is not
+    // compiled in.
+    std::unique_ptr<Physics::World> physics_world;
 #endif
 
     // Convenience accessors

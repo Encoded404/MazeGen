@@ -55,6 +55,10 @@
             "name": "msdfgen",
             "default-features": false
         },
-        "libunibreak"
+        "libunibreak",
+        {
+            "name": "joltphysics",
+            "features": [ "debugrenderer", "rtti" ]
+        }
     ]
 }

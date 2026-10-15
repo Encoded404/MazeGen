@@ -1,5 +1,7 @@
 module;
 
+#include <glm/glm.hpp> // NOLINT(misc-include-cleaner) — exported ShapeDesc members
+
 export module VulkanEngine.Mesh.MeshTypes;
 
 import std;
@@ -7,6 +9,7 @@ import std;
 export import VulkanEngine.MaterialManager.MaterialId;
 export import VulkanEngine.TechniqueManager.TechniqueId;
 export import VulkanEngine.BindlessManager.TextureSlot;
+export import VulkanEngine.Physics.Types;
 
 export namespace VulkanEngine
 {
@@ -122,6 +125,28 @@ export namespace VulkanEngine
         return out;
     }
 
+    // A source-declared physics description, carried as import data only.
+    //
+    // The glTF importer fills this from `KHR_physics_rigid_bodies` on the node
+    // that produced the submesh. Nothing here creates a body or names a physics
+    // backend type: the scene-import consumer decides when to turn a hint into a
+    // `Physics::RigidBody` component, so the asset path stays device- and
+    // Jolt-free. `mass`/damping/CCD are deliberately absent — the extension
+    // carries motion and a collider, and the engine's defaults decide the rest.
+    struct PhysicsHint
+    {
+        Physics::ShapeDesc shape{}; //NOLINT(misc-non-private-member-variables-in-classes)
+        // A node with no `motion` is static per the extension's default.
+        Physics::BodyMotionType motion{Physics::BodyMotionType::Static}; //NOLINT(misc-non-private-member-variables-in-classes)
+        Physics::CollisionLayer layer{Physics::CollisionLayer::Default}; //NOLINT(misc-non-private-member-variables-in-classes)
+        // From the collider's top-level `physicsMaterials` entry (staticFriction
+        // and restitution). The engine's `RigidBody` defaults when absent.
+        float friction{0.5f}; //NOLINT(misc-non-private-member-variables-in-classes)
+        float restitution{0.0f}; //NOLINT(misc-non-private-member-variables-in-classes)
+        // The body declared `trigger`: a sensor volume, not a solid.
+        bool sensor{false}; //NOLINT(misc-non-private-member-variables-in-classes)
+    };
+
     struct SubMesh
     {
         std::uint32_t index_start{0}; //NOLINT(misc-non-private-member-variables-in-classes)
@@ -140,6 +165,10 @@ export namespace VulkanEngine
         // carry no node hierarchy (OBJ, the engine BIN format) and for the
         // synthetic meshes; the glTF importer bakes each node's world transform.
         SubMeshTransform transform{}; //NOLINT(misc-non-private-member-variables-in-classes)
+        // Physics description the source declared for the node that placed this
+        // submesh (glTF `KHR_physics_rigid_bodies`). Absent for every other
+        // format and for nodes that do not use the extension.
+        std::optional<PhysicsHint> physics{}; //NOLINT(misc-non-private-member-variables-in-classes)
     };
 
     // Computes SubMesh::vertex_window_base / vertex_span from the mesh-local

@@ -13,6 +13,8 @@ import FileLoader.Types;
 
 import VulkanEngine.Mesh.MeshTypes;
 import VulkanEngine.MaterialManager.MaterialId;
+import VulkanEngine.Physics.Types;
+import VulkanEngine.SceneLoader;
 import VulkanEngine.FileLoaders.Mesh.GltfMeshAssembler;
 
 namespace {
@@ -730,6 +732,178 @@ TEST_F(GltfGeometryImportTest, UvLessSubmeshDoesNotDiscardGeneratedTangents) {
     };
     EXPECT_GT(length_of(mesh->tangents[0]), 0.5f);
     ExpectVec3(mesh->tangents[3], 0.0f, 0.0f, 0.0f);
+}
+
+// ── KHR_physics_rigid_bodies import ────────────────────────────────────────
+
+// One triangle, one glTF mesh, instanced by seven nodes. Each node probes one
+// part of the extension-to-hint mapping:
+//   0: box (KHR_implicit_shapes), dynamic motion, physicsMaterial 0
+//   1: sphere, kinematic motion
+//   2: no extension at all
+//   3: box, no `motion` key (static)
+//   4: convex hull from node 0's mesh + a `trigger` (sensor)
+//   5: capsule with unequal radii
+//   6: geometry pointing at a node that does not exist (box approximation)
+//   7: triangle-mesh collider from node 0's mesh (no `convexHull`)
+[[nodiscard]] std::string PhysicsRigidBodiesJson(const std::size_t bin_length) {
+    return std::string(R"json({
+  "asset": {"version": "2.0"},
+  "extensionsUsed": ["KHR_physics_rigid_bodies", "KHR_implicit_shapes"],
+  "scene": 0,
+  "scenes": [{"nodes": [0, 1, 2, 3, 4, 5, 6, 7]}],
+  "nodes": [
+    {"mesh": 0, "extensions": {"KHR_physics_rigid_bodies": {
+      "motion": {"isKinematic": false},
+      "collider": {"geometry": {"shape": 0}, "physicsMaterial": 0}}}},
+    {"mesh": 0, "extensions": {"KHR_physics_rigid_bodies": {
+      "motion": {"isKinematic": true},
+      "collider": {"geometry": {"shape": 1}}}}},
+    {"mesh": 0},
+    {"mesh": 0, "extensions": {"KHR_physics_rigid_bodies": {
+      "collider": {"geometry": {"shape": 0}}}}},
+    {"mesh": 0, "extensions": {"KHR_physics_rigid_bodies": {
+      "collider": {"geometry": {"node": 0, "convexHull": true}},
+      "trigger": {"geometry": {"node": 0}}}}},
+    {"mesh": 0, "extensions": {"KHR_physics_rigid_bodies": {
+      "collider": {"geometry": {"shape": 2}}}}},
+    {"mesh": 0, "extensions": {"KHR_physics_rigid_bodies": {
+      "collider": {"geometry": {"node": 99}}}}},
+    {"mesh": 0, "extensions": {"KHR_physics_rigid_bodies": {
+      "collider": {"geometry": {"node": 0}}}}}
+  ],
+  "meshes": [{"primitives": [{"attributes": {"POSITION": 0, "NORMAL": 1}, "indices": 2, "mode": 4}]}],
+  "extensions": {
+    "KHR_implicit_shapes": {"shapes": [
+      {"type": "box", "box": {"size": [1.0, 2.0, 3.0]}},
+      {"type": "sphere", "sphere": {"radius": 0.75}},
+      {"type": "capsule", "capsule": {"height": 2.5, "radiusBottom": 0.4, "radiusTop": 0.6}}
+    ]},
+    "KHR_physics_rigid_bodies": {"physicsMaterials": [
+      {"staticFriction": 0.42, "dynamicFriction": 0.3, "restitution": 0.25}
+    ]}
+  },
+  "buffers": [{"byteLength": )json") + std::to_string(bin_length) + R"json(}],
+  "bufferViews": [
+    {"buffer": 0, "byteOffset": 0, "byteLength": 36, "target": 34962},
+    {"buffer": 0, "byteOffset": 36, "byteLength": 36, "target": 34962},
+    {"buffer": 0, "byteOffset": 72, "byteLength": 6, "target": 34963}
+  ],
+  "accessors": [
+    {"bufferView": 0, "componentType": 5126, "count": 3, "type": "VEC3"},
+    {"bufferView": 1, "componentType": 5126, "count": 3, "type": "VEC3"},
+    {"bufferView": 2, "componentType": 5123, "count": 3, "type": "SCALAR"}
+  ]
+})json";
+}
+
+// Positions (0,0,0), (1,0,0), (0,1,0) with +Z normals and a 3-index triangle.
+[[nodiscard]] std::vector<std::byte> SingleTriangleBin() {
+    std::vector<std::byte> bin;
+    AppendFloat(bin, 0.0f); AppendFloat(bin, 0.0f); AppendFloat(bin, 0.0f);
+    AppendFloat(bin, 1.0f); AppendFloat(bin, 0.0f); AppendFloat(bin, 0.0f);
+    AppendFloat(bin, 0.0f); AppendFloat(bin, 1.0f); AppendFloat(bin, 0.0f);
+    for (int i = 0; i < 3; ++i) {
+        AppendFloat(bin, 0.0f); AppendFloat(bin, 0.0f); AppendFloat(bin, 1.0f);
+    }
+    AppendU16(bin, 0); AppendU16(bin, 1); AppendU16(bin, 2);
+    return bin;
+}
+
+TEST_F(GltfGeometryImportTest, PhysicsRigidBodiesBecomeSubmeshHints) {
+    const std::vector<std::byte> bin = SingleTriangleBin();
+    const auto path = WriteFixture("physics_rigid_bodies.glb",
+                                   MakeGlb(PhysicsRigidBodiesJson(bin.size()), bin));
+    const std::shared_ptr<Mesh> mesh = Assemble(path);
+    ASSERT_NE(mesh, nullptr);
+
+    // One submesh per node, in node order; the shared geometry is emitted once.
+    ASSERT_EQ(mesh->subMeshes.size(), 8u);
+
+    // Node 0: box collider (full extents), dynamic motion, and the material's
+    // staticFriction/restitution.
+    const auto& box = mesh->subMeshes[0].physics;
+    ASSERT_TRUE(box.has_value());
+    EXPECT_EQ(box->shape.type, VulkanEngine::Physics::ShapeType::Box);
+    EXPECT_NEAR(box->shape.box_extent.x, 1.0f, kEps);
+    EXPECT_NEAR(box->shape.box_extent.y, 2.0f, kEps);
+    EXPECT_NEAR(box->shape.box_extent.z, 3.0f, kEps);
+    EXPECT_EQ(box->motion, VulkanEngine::Physics::BodyMotionType::Dynamic);
+    EXPECT_EQ(box->layer, VulkanEngine::Physics::CollisionLayer::Default);
+    EXPECT_NEAR(box->friction, 0.42f, kEps);
+    EXPECT_NEAR(box->restitution, 0.25f, kEps);
+    EXPECT_FALSE(box->sensor);
+
+    // Node 1: sphere radius, kinematic motion.
+    const auto& sphere = mesh->subMeshes[1].physics;
+    ASSERT_TRUE(sphere.has_value());
+    EXPECT_EQ(sphere->shape.type, VulkanEngine::Physics::ShapeType::Sphere);
+    EXPECT_NEAR(sphere->shape.radius, 0.75f, kEps);
+    EXPECT_EQ(sphere->motion, VulkanEngine::Physics::BodyMotionType::Kinematic);
+
+    // Node 2: no extension, no hint.
+    EXPECT_FALSE(mesh->subMeshes[2].physics.has_value());
+
+    // Node 3: a collider with no `motion` key defaults to static.
+    const auto& static_box = mesh->subMeshes[3].physics;
+    ASSERT_TRUE(static_box.has_value());
+    EXPECT_EQ(static_box->shape.type, VulkanEngine::Physics::ShapeType::Box);
+    EXPECT_EQ(static_box->motion, VulkanEngine::Physics::BodyMotionType::Static);
+
+    // Node 4: convex hull of node 0's mesh, and `trigger` makes it a sensor.
+    const auto& hull = mesh->subMeshes[4].physics;
+    ASSERT_TRUE(hull.has_value());
+    EXPECT_EQ(hull->shape.type, VulkanEngine::Physics::ShapeType::ConvexHull);
+    ASSERT_NE(hull->shape.points, nullptr);
+    EXPECT_EQ(hull->shape.points->size(), 3u);
+    EXPECT_TRUE(hull->sensor);
+
+    // Node 5: capsule; the engine is single-radius, so the larger end wins.
+    const auto& capsule = mesh->subMeshes[5].physics;
+    ASSERT_TRUE(capsule.has_value());
+    EXPECT_EQ(capsule->shape.type, VulkanEngine::Physics::ShapeType::Capsule);
+    EXPECT_NEAR(capsule->shape.height, 2.5f, kEps);
+    EXPECT_NEAR(capsule->shape.radius, 0.6f, kEps);
+
+    // Node 6: an unresolvable geometry reference is approximated by a box
+    // around the node's own mesh bounds — never silently exact.
+    const auto& approximated = mesh->subMeshes[6].physics;
+    ASSERT_TRUE(approximated.has_value());
+    EXPECT_EQ(approximated->shape.type, VulkanEngine::Physics::ShapeType::Box);
+    EXPECT_NEAR(approximated->shape.box_extent.x, 1.0f, kEps);
+    EXPECT_NEAR(approximated->shape.box_extent.y, 1.0f, kEps);
+    EXPECT_GT(approximated->shape.box_extent.z, 0.0f);
+
+    // Node 7: no `convexHull`, so the referenced mesh becomes a triangle mesh
+    // with both its points and its indices.
+    const auto& trimesh = mesh->subMeshes[7].physics;
+    ASSERT_TRUE(trimesh.has_value());
+    EXPECT_EQ(trimesh->shape.type, VulkanEngine::Physics::ShapeType::Mesh);
+    ASSERT_NE(trimesh->shape.points, nullptr);
+    EXPECT_EQ(trimesh->shape.points->size(), 3u);
+    ASSERT_NE(trimesh->shape.indices, nullptr);
+    EXPECT_EQ(trimesh->shape.indices->size(), 3u);
+}
+
+// The hint is import data, not a body: it must survive the whole SceneImport
+// path (`LoadedMeshData` and the GPU-facing `MeshData`) so the scene consumer
+// that builds entities is the one that decides to add physics components.
+TEST_F(GltfGeometryImportTest, PhysicsHintSurvivesSceneImport) {
+    const std::vector<std::byte> bin = SingleTriangleBin();
+    const auto path = WriteFixture("physics_scene_import.glb",
+                                   MakeGlb(PhysicsRigidBodiesJson(bin.size()), bin));
+
+    const auto loaded = VulkanEngine::SceneLoader::LoadMeshFromFilePath(path, nullptr);
+    ASSERT_EQ(loaded.submeshes.size(), 8u) << "fixture fell back to the fallback quad";
+    const auto& hint = loaded.submeshes[0].physics;
+    ASSERT_TRUE(hint.has_value());
+    EXPECT_EQ(hint->shape.type, VulkanEngine::Physics::ShapeType::Box);
+
+    const auto data = VulkanEngine::SceneLoader::ToMeshData(loaded);
+    ASSERT_EQ(data.sub_meshes.size(), 8u);
+    ASSERT_TRUE(data.sub_meshes[1].physics.has_value());
+    EXPECT_EQ(data.sub_meshes[1].physics->shape.type, VulkanEngine::Physics::ShapeType::Sphere);
+    EXPECT_NEAR(data.sub_meshes[1].physics->shape.radius, 0.75f, kEps);
 }
 
 } // namespace

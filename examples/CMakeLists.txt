@@ -1,6 +1,7 @@
 include(AddEngineExample)
 
 add_subdirectory(minimal)
+add_subdirectory(physics_vehicle)
 add_subdirectory(basic_scene)
 add_subdirectory(infinite_runner)
 add_subdirectory(custom_pass)

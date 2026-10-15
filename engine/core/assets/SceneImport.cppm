@@ -41,6 +41,12 @@ struct LoadedMeshData {
     std::vector<float> tangents;
     std::vector<float> tangent_handedness;
     std::vector<std::uint32_t> indices;
+    // Per-submesh placement and, when the source declared one, its physics hint
+    // (`SubMesh::physics`). The loader copies whole `SubMesh` values, so a
+    // consumer of this result — and of `ToMeshData` below — sees the
+    // `KHR_physics_rigid_bodies` collider data unchanged and can turn it into
+    // `Physics::RigidBody`/`Collider` components when it builds entities.
+    // Nothing on this path creates a body.
     std::vector<VulkanEngine::SubMesh> submeshes;
 };
 

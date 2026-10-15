@@ -35,6 +35,13 @@ export import VulkanEngine.Text.Font;
 export import VulkanEngine.PhysicalCameraSystem;
 #endif
 
+#ifdef VKENGINE_PHYSICS
+export import VulkanEngine.Physics.World;
+export import VulkanEngine.Physics.Components;
+export import VulkanEngine.Physics.BodyBridge;
+export import VulkanEngine.Physics.Character;
+#endif
+
 import VulkanBackend.Platform.SdlPlatform;
 import VulkanShared.CallbackList;
 import VulkanEngine.MeshManager;
@@ -189,6 +196,11 @@ public:
     MeshRenderSystem& GetMeshRenderSystem() { return ctx_.mesh_render_system; }
 #ifdef VKENGINE_PHYSICAL_CAMERA
     PhysicalCamera::PhysicalCameraSystem* GetPhysicalCameraSystem() { return ctx_.physical_camera.get(); }
+#endif
+#ifdef VKENGINE_PHYSICS
+    // The physics world, stepped once per fixed step in the
+    // SystemSlot::PhysicsSimulate system. Null when physics is not compiled in.
+    Physics::World* GetPhysicsWorld() { return ctx_.physics_world.get(); }
 #endif
     // Id of the main lit technique. Materials of that technique resolve to a
     // draw group derived from their render state; the technique's base group

@@ -1,5 +1,6 @@
 module;
 
+#include <glm/glm.hpp> // NOLINT(misc-include-cleaner) — ShapeDesc point/box vectors
 #include <logging/logging_macros.hpp>
 
 module VulkanEngine.FileLoaders.Mesh.GltfMeshAssembler;
@@ -10,6 +11,7 @@ import logiface;
 import fastgltf;
 
 import VulkanEngine.Mesh.MeshTypes;
+import VulkanEngine.Physics.Types;
 import VulkanEngine.FileLoaders.Mesh.MeshLoaderBase;
 import VulkanEngine.FileLoaders.Mesh.GltfMaterialImport;
 import VulkanEngine.MaterialManager.MaterialId;
@@ -111,6 +113,232 @@ template <typename T>
     values.reserve(accessor.count);
     fastgltf::iterateAccessor<T>(asset, accessor, [&values](const T value) { values.push_back(value); });
     return values;
+}
+
+// ── KHR_physics_rigid_bodies -> engine physics hints ────────────────────────
+//
+// The extension attaches a rigid body to a node: a motion (or none, which means
+// static), a collider whose geometry is either an implicit shape from
+// KHR_implicit_shapes or the mesh of a referenced node, an optional physics
+// material index, and an optional trigger form. Everything below only builds
+// data (`VulkanEngine::PhysicsHint`); no body is created and no backend type is
+// named, matching the assets layer's contract.
+
+using VulkanEngine::Physics::BodyMotionType;
+using VulkanEngine::Physics::CollisionLayer;
+using VulkanEngine::Physics::ShapeDesc;
+using VulkanEngine::Physics::ShapeType;
+
+// Local AABB of every POSITION accessor a glTF mesh's primitives reference.
+struct LocalBounds {
+    glm::vec3 min{0.0f};
+    glm::vec3 max{0.0f};
+};
+
+[[nodiscard]] std::optional<LocalBounds> MeshBounds(const fastgltf::Asset& asset,
+                                                    const fastgltf::Mesh& mesh) {
+    std::optional<LocalBounds> bounds;
+    for (const fastgltf::Primitive& primitive : mesh.primitives) {
+        const auto position_it = primitive.findAttribute("POSITION");
+        if (position_it == primitive.attributes.end()) continue;
+        for (const fastgltf::math::fvec3& p :
+             ReadAccessor<fastgltf::math::fvec3>(asset, position_it->accessorIndex)) {
+            const glm::vec3 v{p.x(), p.y(), p.z()};
+            if (!bounds.has_value()) {
+                bounds = LocalBounds{v, v};
+            } else {
+                bounds->min = glm::min(bounds->min, v);
+                bounds->max = glm::max(bounds->max, v);
+            }
+        }
+    }
+    return bounds;
+}
+
+// The first primitive of a glTF mesh that carries positions, as ShapeDesc data.
+// The points stay in mesh-local space, which is the body frame the engine's
+// `ShapeDesc` describes; `convex_hull` selects the hull representation, else the
+// triangle-mesh one. Nothing here resolves materials or placement: a collider
+// shape only needs geometry.
+[[nodiscard]] std::optional<ShapeDesc> ShapeFromMeshGeometry(const fastgltf::Asset& asset,
+                                                             const std::size_t mesh_index,
+                                                             const bool convex_hull) {
+    if (mesh_index >= asset.meshes.size()) return std::nullopt;
+    for (const fastgltf::Primitive& primitive : asset.meshes[mesh_index].primitives) {
+        const auto position_it = primitive.findAttribute("POSITION");
+        if (position_it == primitive.attributes.end()) continue;
+        const std::vector<fastgltf::math::fvec3> positions =
+            ReadAccessor<fastgltf::math::fvec3>(asset, position_it->accessorIndex);
+        if (positions.empty()) continue;
+
+        auto points = std::make_shared<std::vector<glm::vec3>>();
+        points->reserve(positions.size());
+        for (const fastgltf::math::fvec3& p : positions) points->emplace_back(p.x(), p.y(), p.z());
+
+        ShapeDesc shape{};
+        shape.points = std::move(points);
+        if (convex_hull) {
+            shape.type = ShapeType::ConvexHull;
+            return shape;
+        }
+        shape.type = ShapeType::Mesh;
+        auto indices = std::make_shared<std::vector<std::uint32_t>>();
+        if (primitive.indicesAccessor.has_value()) {
+            *indices = ReadAccessor<std::uint32_t>(asset, *primitive.indicesAccessor);
+        } else {
+            indices->resize(positions.size());
+            std::iota(indices->begin(), indices->end(), 0u);
+        }
+        shape.indices = std::move(indices);
+        return shape;
+    }
+    return std::nullopt;
+}
+
+// One KHR_implicit_shapes entry as a ShapeDesc. The engine's capsule and
+// cylinder are single-radius; the extension allows a different radius at each
+// end, so the larger one is used and the difference is reported.
+[[nodiscard]] std::optional<ShapeDesc> ShapeFromImplicitShape(const fastgltf::Asset& asset,
+                                                              const std::size_t shape_index) {
+    if (shape_index >= asset.shapes.size()) return std::nullopt;
+    // `fastgltf::Shape` is the one KHR_implicit_shapes type the parser does not
+    // export from its module (the alias is not marked FASTGLTF_EXPORT), so it is
+    // reached through `auto` rather than named.
+    const auto& source = asset.shapes[shape_index];
+    ShapeDesc shape{};
+    if (const auto* box = std::get_if<fastgltf::BoxShape>(&source)) {
+        shape.type = ShapeType::Box;
+        shape.box_extent = glm::vec3{box->size.x(), box->size.y(), box->size.z()};
+        return shape;
+    }
+    if (const auto* sphere = std::get_if<fastgltf::SphereShape>(&source)) {
+        shape.type = ShapeType::Sphere;
+        shape.radius = static_cast<float>(sphere->radius);
+        return shape;
+    }
+    if (const auto* capsule = std::get_if<fastgltf::CapsuleShape>(&source)) {
+        shape.type = ShapeType::Capsule;
+        shape.height = static_cast<float>(capsule->height);
+        shape.radius = static_cast<float>(std::max(capsule->radiusBottom, capsule->radiusTop));
+        if (capsule->radiusBottom != capsule->radiusTop) {
+            LOGIFACE_LOG(debug, "GltfMeshAssembler: KHR_implicit_shapes capsule " +
+                                    std::to_string(shape_index) + " has unequal radii (" +
+                                    std::to_string(capsule->radiusBottom) + " / " +
+                                    std::to_string(capsule->radiusTop) +
+                                    "); the engine's capsule is single-radius, so the larger is used");
+        }
+        return shape;
+    }
+    if (const auto* cylinder = std::get_if<fastgltf::CylinderShape>(&source)) {
+        shape.type = ShapeType::Cylinder;
+        shape.height = static_cast<float>(cylinder->height);
+        shape.radius = static_cast<float>(std::max(cylinder->radiusBottom, cylinder->radiusTop));
+        if (cylinder->radiusBottom != cylinder->radiusTop) {
+            LOGIFACE_LOG(debug, "GltfMeshAssembler: KHR_implicit_shapes cylinder " +
+                                    std::to_string(shape_index) + " has unequal radii (" +
+                                    std::to_string(cylinder->radiusBottom) + " / " +
+                                    std::to_string(cylinder->radiusTop) +
+                                    "); the engine's cylinder is single-radius, so the larger is used");
+        }
+        return shape;
+    }
+    return std::nullopt;
+}
+
+// The collider's shape, preferring the implicit representation, then the mesh of
+// the referenced node, and finally a box around the collider node's own mesh
+// bounds. `approximated` reports the last path, which is never presented as an
+// exact collider.
+[[nodiscard]] std::optional<ShapeDesc> ShapeFromGeometry(const fastgltf::Asset& asset,
+                                                         const fastgltf::Node& node,
+                                                         const fastgltf::Geometry& geometry,
+                                                         bool& approximated) {
+    if (geometry.shape.has_value()) {
+        if (auto shape = ShapeFromImplicitShape(asset, *geometry.shape)) return shape;
+        LOGIFACE_LOG(debug, "GltfMeshAssembler: KHR_physics_rigid_bodies collider references "
+                            "KHR_implicit_shapes index " + std::to_string(*geometry.shape) +
+                            ", which does not resolve");
+    }
+    if (geometry.node.has_value()) {
+        const std::size_t geometry_node = *geometry.node;
+        if (geometry_node < asset.nodes.size() &&
+            asset.nodes[geometry_node].meshIndex.has_value()) {
+            if (auto shape = ShapeFromMeshGeometry(asset, *asset.nodes[geometry_node].meshIndex,
+                                                   geometry.convexHull)) {
+                return shape;
+            }
+        }
+        LOGIFACE_LOG(debug, "GltfMeshAssembler: KHR_physics_rigid_bodies collider references node " +
+                                std::to_string(geometry_node) +
+                                " for mesh geometry, which does not resolve");
+    }
+    // Nothing authoritative resolved: fall back to the collider node's own mesh
+    // bounds. Reported to the caller so the hint records an approximation.
+    if (node.meshIndex.has_value() && *node.meshIndex < asset.meshes.size()) {
+        if (const auto bounds = MeshBounds(asset, asset.meshes[*node.meshIndex])) {
+            approximated = true;
+            ShapeDesc shape{};
+            shape.type = ShapeType::Box;
+            // A flat (or degenerate) mesh still needs a positive box extent.
+            shape.box_extent = glm::max(bounds->max - bounds->min, glm::vec3{1e-4f});
+            return shape;
+        }
+    }
+    return std::nullopt;
+}
+
+// The complete hint for a node carrying the extension: shape, motion, material
+// friction/restitution and trigger flag. A node without the extension yields
+// nothing, which is what keeps every other asset's submeshes hint-free.
+[[nodiscard]] std::optional<VulkanEngine::PhysicsHint> BuildPhysicsHint(
+    const fastgltf::Asset& asset, const fastgltf::Node& node) {
+    const fastgltf::PhysicsRigidBody* rigid_body = node.physicsRigidBody.get();
+    if (rigid_body == nullptr) return std::nullopt;
+
+    VulkanEngine::PhysicsHint hint{};
+    // A body with no `motion` is static per the extension's default; the engine
+    // has no layer vocabulary in the extension, so every imported body lands on
+    // the ordinary geometry layer until gameplay re-assigns it.
+    if (rigid_body->motion.has_value()) {
+        hint.motion = rigid_body->motion->isKinematic ? BodyMotionType::Kinematic
+                                                      : BodyMotionType::Dynamic;
+    }
+    hint.layer = CollisionLayer::Default;
+    hint.sensor = rigid_body->trigger.has_value();
+
+    if (!rigid_body->collider.has_value()) {
+        LOGIFACE_LOG(debug, "GltfMeshAssembler: KHR_physics_rigid_bodies body has no collider; "
+                            "the default box shape is used");
+        return hint;
+    }
+    const fastgltf::Collider& collider = *rigid_body->collider;
+    bool approximated = false;
+    if (auto shape = ShapeFromGeometry(asset, node, collider.geometry, approximated)) {
+        hint.shape = *shape;
+    } else {
+        LOGIFACE_LOG(debug, "GltfMeshAssembler: KHR_physics_rigid_bodies collider geometry does not "
+                            "resolve to a shape or a mesh; the default box shape is used");
+    }
+    if (approximated) {
+        LOGIFACE_LOG(debug, "GltfMeshAssembler: KHR_physics_rigid_bodies collider geometry could not be "
+                            "resolved exactly; it is approximated by a box around the node's mesh bounds");
+    }
+
+    if (collider.physicsMaterial.has_value()) {
+        const std::size_t index = *collider.physicsMaterial;
+        if (index < asset.physicsMaterials.size()) {
+            // staticFriction is the engine's coefficient: the engine has one
+            // friction value, so the extension's separate dynamic coefficient
+            // has nowhere to go.
+            hint.friction = static_cast<float>(asset.physicsMaterials[index].staticFriction);
+            hint.restitution = static_cast<float>(asset.physicsMaterials[index].restitution);
+        } else {
+            LOGIFACE_LOG(debug, "GltfMeshAssembler: KHR_physics_rigid_bodies physicsMaterial index " +
+                                    std::to_string(index) +
+                                    " is out of range; the engine's friction/restitution defaults are used");
+        }
+    }
+    return hint;
 }
 
 // ── vertex emission ─────────────────────────────────────────────────────────
@@ -567,6 +795,17 @@ void ConvertAsset(const fastgltf::Asset& asset,
             LOGIFACE_LOG(warn, "GltfMeshAssembler: the asset contains a skinned node; skinning is not imported");
         }
 
+        // KHR_physics_rigid_bodies lives on the node, so every submesh placed
+        // for this node carries the same hint — including several primitives of
+        // one mesh, which are one body in the extension's model.
+        const std::optional<VulkanEngine::PhysicsHint> node_physics =
+            BuildPhysicsHint(asset, node);
+        if (node_physics.has_value() && !node.meshIndex.has_value()) {
+            LOGIFACE_LOG(debug, "GltfMeshAssembler: node " + std::to_string(parent.node) +
+                                    " declares KHR_physics_rigid_bodies but has no mesh; the collider "
+                                    "hint has no submesh to attach to and is dropped");
+        }
+
         if (node.meshIndex.has_value() && *node.meshIndex < asset.meshes.size()) {
             const std::size_t gltf_mesh = *node.meshIndex;
             // glTF instances a mesh by referencing it from several nodes. The
@@ -585,6 +824,7 @@ void ConvertAsset(const fastgltf::Asset& asset,
             for (const std::size_t index : cached->second) {
                 VulkanEngine::SubMesh placed = state.geometry[index].submesh;
                 placed.transform = node_trs;
+                placed.physics = node_physics;
                 mesh.subMeshes.push_back(placed);
             }
         }
@@ -615,11 +855,17 @@ GltfMeshAssembler::AssembleFromFullBuffer(std::shared_ptr<FileLoader::ByteBuffer
 
         // Extensions the asset may use. Quantization is a geometry extension, so
         // it belongs here rather than only in the material importer.
+        // KHR_physics_rigid_bodies (and the KHR_implicit_shapes shapes it
+        // references) are asked for explicitly: without the bit fastgltf skips
+        // the node extension object entirely, and the collider hints would
+        // silently vanish.
         fastgltf::Parser parser(fastgltf::Extensions::KHR_mesh_quantization |
                                 fastgltf::Extensions::KHR_texture_transform |
                                 fastgltf::Extensions::KHR_texture_basisu |
                                 fastgltf::Extensions::KHR_materials_emissive_strength |
-                                fastgltf::Extensions::KHR_materials_unlit);
+                                fastgltf::Extensions::KHR_materials_unlit |
+                                fastgltf::Extensions::KHR_physics_rigid_bodies |
+                                fastgltf::Extensions::KHR_implicit_shapes);
 
         auto data = fastgltf::GltfDataBuffer::FromBytes(
             reinterpret_cast<const std::byte*>(buffer->data()), buffer->size());
