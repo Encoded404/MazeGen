@@ -34,7 +34,7 @@ struct Camera {
     float fov_degrees = 60.0f; // NOLINT(misc-non-private-member-variables-in-classes)
     float orthographic_size = 10.0f; // NOLINT(misc-non-private-member-variables-in-classes)
     float near_plane = 0.1f; // NOLINT(misc-non-private-member-variables-in-classes)
-    float far_plane = 100.0f; // NOLINT(misc-non-private-member-variables-in-classes)
+    float far_plane = 10000.0f; // NOLINT(misc-non-private-member-variables-in-classes)
     ProjectionMode projection_mode = ProjectionMode::Perspective; // NOLINT(misc-non-private-member-variables-in-classes)
     CameraOrientation orientation = CameraOrientation::LookAtTarget; // NOLINT(misc-non-private-member-variables-in-classes)
 
