@@ -68,13 +68,15 @@ public:
     // `sampler_cache` deduplicates the VkSampler objects the uploaded textures
     // share. It may be null (the device-free tests own their samplers), in
     // which case each texture owns a private sampler.
+    //
+    // Decode/transcode work is submitted to the shared compute pool; this class
+    // owns no threads of its own.
     bool Initialize(VulkanBackend::Vulkan::IVulkanBootstrap& backend,
                     GpuResources::GpuImageHeap& image_heap,
                     GpuResources::StagingPool& staging_pool,
                     BindlessManager::BindlessManager& bindless,
                     const VulkanBackend::Vulkan::VulkanCapabilities& capabilities,
-                    GpuResources::SamplerCache* sampler_cache = nullptr,
-                    std::size_t worker_count = 2);
+                    GpuResources::SamplerCache* sampler_cache = nullptr);
     void Shutdown();
 
     // Immediate, no GPU work. Reserves a slot pre-bound to the fallback and
@@ -153,7 +155,10 @@ private:
         std::shared_ptr<std::promise<UploadResult>> promise{};
     };
 
-    void WorkerLoop();
+    // Decode/transcode one item on the shared compute pool. It yields to any
+    // queued realtime (simulation) work, which is the guarantee the uploader
+    // used to buy by running two private threads outside the pool entirely.
+    void ProcessItem(WorkerItem item);
     void CompleteItem(const ReadyItem& item, UploadStatus status, std::string error);
 
     VulkanBackend::Vulkan::IVulkanBootstrap* backend_ = nullptr;
@@ -163,13 +168,10 @@ private:
     const VulkanBackend::Vulkan::VulkanCapabilities* capabilities_ = nullptr;
     GpuResources::SamplerCache* sampler_cache_ = nullptr;
 
-    // Dedicated decode/transcode worker pool (never ThreadPool::Global()).
-    std::vector<std::jthread> workers_{};
-    mutable std::mutex work_mutex_{};
-    std::condition_variable work_cv_{};
-    std::deque<WorkerItem> work_queue_{};
-    std::uint64_t next_sequence_ = 1;
-    bool stop_ = false;
+    // Decode jobs handed to the shared pool but not yet landed in `ready_`.
+    // Shutdown drains this before dropping the backend/capability pointers the
+    // jobs dereference.
+    std::atomic<std::uint32_t> in_flight_{0};
 
     std::mutex ready_mutex_{};
     std::vector<ReadyItem> ready_{};
@@ -179,7 +181,6 @@ private:
     std::function<void(BindlessManager::TextureHandle, const ResourceId&)> on_reserve_{};
     std::vector<StagedItem> staged_{};
     UploadScheduler scheduler_{};
-    std::atomic<std::uint32_t> in_flight_{0};
 };
 
 } // namespace VulkanEngine::Textures

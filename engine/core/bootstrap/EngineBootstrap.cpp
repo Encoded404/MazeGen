@@ -9,6 +9,7 @@ import std.compat;
 import logiface;
 import vulkan;
 
+import VulkanShared.Jobs;
 import VulkanShared.ScopedSection;
 import VulkanShared.Teardown;
 
@@ -54,6 +55,12 @@ bool EngineBootstrap::Initialize(EngineContext& ctx,
                                   const GameConfig& config,
                                   VulkanBackend::Vulkan::VulkanBootstrap& backend) {
     auto& vk_backend = backend.GetBackend();
+
+    // Size the engine's single compute pool before anything submits work to it.
+    // One sizing policy covers every compute-hungry system from here on; a
+    // budget of 0 collapses all of them onto the calling thread.
+    VulkanShared::JobScheduler::Global().Configure(
+        VulkanShared::JobBudget{.workers = config.job_workers});
 
     // Record the shaping/rasterization library identity once at startup. These
     // two dependencies are the usual explanation for a glyph or layout
@@ -292,9 +299,9 @@ void EngineBootstrap::Shutdown(EngineContext& ctx,
     //   - staging/dynamic/static heaps -> everything that owns a range in them.
     //   - sampler_cache     -> every sampler owner, and runs before the device is destroyed.
     // The ids held above are exactly the ones referenced by a later edge.
-    const std::size_t worker_count =
-        std::min<std::size_t>(4, std::max<std::size_t>(2, std::thread::hardware_concurrency()));
-    VulkanShared::TeardownScheduler teardown{worker_count};
+    // Teardown rides the shared compute pool: its own thread-count policy is
+    // gone, and the dependency graph is expressed as dependency-counted jobs.
+    VulkanShared::TeardownScheduler teardown;
 
     // Idle barrier. Every task below that may touch the device or queue declares
     // this as a dependency, so the idle completes before any destruction starts.

@@ -23,6 +23,7 @@ import VulkanEngine.TextureTypes;
 import VulkanEngine.TextureFormat;
 import VulkanEngine.TextureUploadScheduler;
 import VulkanEngine.FileLoaders.TextureLoaders;
+import VulkanShared.Jobs;
 
 namespace VulkanEngine::Textures {
 
@@ -75,35 +76,26 @@ bool TextureUploader::Initialize(VulkanBackend::Vulkan::IVulkanBootstrap& backen
                                  GpuResources::StagingPool& staging_pool,
                                  BindlessManager::BindlessManager& bindless,
                                  const VulkanBackend::Vulkan::VulkanCapabilities& capabilities,
-                                 GpuResources::SamplerCache* sampler_cache,
-                                 std::size_t worker_count) {
+                                 GpuResources::SamplerCache* sampler_cache) {
     backend_ = &backend;
     image_heap_ = &image_heap;
     staging_pool_ = &staging_pool;
     bindless_ = &bindless;
     capabilities_ = &capabilities;
     sampler_cache_ = sampler_cache;
-    stop_ = false;
-
-    worker_count = std::max<std::size_t>(worker_count, 1U);
-    workers_.reserve(worker_count);
-    for (std::size_t i = 0; i < worker_count; ++i) {
-        workers_.emplace_back([this](std::stop_token) { WorkerLoop(); });
-    }
-    LOGIFACE_LOG(debug, "TextureUploader initialized with " + std::to_string(worker_count) + " workers");
+    LOGIFACE_LOG(debug, "TextureUploader initialized on the shared compute pool");
     return true;
 }
 
 void TextureUploader::Shutdown() {
-    {
-        std::lock_guard lock(work_mutex_);
-        stop_ = true;
+    // Decode jobs already handed to the shared pool dereference the backend and
+    // capability pointers below, so they must land before this drops them. The
+    // wait participates in the pool rather than spinning on it.
+    while (in_flight_.load(std::memory_order_acquire) != 0) {
+        if (!VulkanShared::JobScheduler::Global().TryExecuteOne()) {
+            std::this_thread::yield();
+        }
     }
-    work_cv_.notify_all();
-    for (auto& worker : workers_) {
-        worker.request_stop();
-    }
-    workers_.clear();
 
     // Resolve any promises still outstanding so callers do not block forever.
     std::lock_guard lock(ready_mutex_);
@@ -158,79 +150,66 @@ std::future<UploadResult> TextureUploader::Submit(TextureReservation reservation
                                         .error = "uploader not initialized"});
         return future;
     }
-    std::lock_guard lock(work_mutex_);
+
     WorkerItem item{};
     item.reservation = reservation;
     item.source = std::move(data);
     item.priority = priority;
-    item.sequence = next_sequence_++;
     item.promise = std::move(promise);
-    work_queue_.push_back(std::move(item));
-    work_cv_.notify_one();
+    in_flight_.fetch_add(1, std::memory_order_acq_rel);
+    VulkanShared::JobScheduler::Global().Submit(
+        VulkanShared::Tier::Compute, "texture-decode",
+        [this, item = std::move(item)]() mutable { ProcessItem(std::move(item)); });
     return future;
 }
 
-void TextureUploader::WorkerLoop() {
+void TextureUploader::ProcessItem(WorkerItem item) {
     CapabilityFormatQuery query(capabilities_->GetFormatCapabilities());
-    while (true) {
-        WorkerItem item{};
-        {
-            std::unique_lock lock(work_mutex_);
-            work_cv_.wait(lock, [this] { return stop_ || !work_queue_.empty(); });
-            if (work_queue_.empty()) {
-                if (stop_) {
-                    return;
-                }
-                continue;
+
+    ReadyItem ready{};
+    ready.reservation = item.reservation;
+    ready.promise = item.promise;
+    ready.data = *item.source;
+
+    const auto resolved = ResolveUploadFormat(
+        item.reservation.semantic, item.reservation.normal_encoding,
+        ready.data.source_format, ready.data.needs_transcode,
+        ready.data.source_channels, ready.data.source_alpha != 0,
+        ready.data.is_hdr_source, query);
+    if (resolved.format == vk::Format::eUndefined) {
+        ready.ok = false;
+        ready.error = "no legal upload format";
+        ready.format = vk::Format::eUndefined;
+    } else {
+        ready.format = resolved.format;
+        ready.ok = true;
+        if (ready.data.needs_transcode) {
+            if (!VulkanEngine::FileLoaders::Textures::TranscodeBasisToTarget(
+                    ready.data, resolved.format, &ready.error)) {
+                ready.ok = false;
             }
-            item = std::move(work_queue_.front());
-            work_queue_.pop_front();
-        }
-        ++in_flight_;
-
-        ReadyItem ready{};
-        ready.reservation = item.reservation;
-        ready.promise = item.promise;
-        ready.data = *item.source;
-
-        const auto resolved = ResolveUploadFormat(
-            item.reservation.semantic, item.reservation.normal_encoding,
-            ready.data.source_format, ready.data.needs_transcode,
-            ready.data.source_channels, ready.data.source_alpha != 0,
-            ready.data.is_hdr_source, query);
-        if (resolved.format == vk::Format::eUndefined) {
-            ready.ok = false;
-            ready.error = "no legal upload format";
-            ready.format = vk::Format::eUndefined;
-        } else {
-            ready.format = resolved.format;
-            ready.ok = true;
-            if (ready.data.needs_transcode) {
-                if (!VulkanEngine::FileLoaders::Textures::TranscodeBasisToTarget(
-                        ready.data, resolved.format, &ready.error)) {
-                    ready.ok = false;
-                }
-            } else if (resolved.decoded) {
-                // Native ASTC payload without device ASTC support: CPU-decode
-                // on the worker thread (libktx 4.4). The decoder picks the
-                // uncompressed variant from the DFD, so the upload format is
-                // whatever it actually produced, not what the resolver guessed.
-                if (!VulkanEngine::FileLoaders::Textures::DecodeAstcToRgba8(
-                        ready.data, &ready.error)) {
-                    ready.ok = false;
-                } else {
-                    ready.format = ready.data.source_format;
-                }
+        } else if (resolved.decoded) {
+            // Native ASTC payload without device ASTC support: CPU-decode
+            // on the worker thread (libktx 4.4). The decoder picks the
+            // uncompressed variant from the DFD, so the upload format is
+            // whatever it actually produced, not what the resolver guessed.
+            if (!VulkanEngine::FileLoaders::Textures::DecodeAstcToRgba8(
+                    ready.data, &ready.error)) {
+                ready.ok = false;
             } else {
-                // Fill in a CPU mip chain for uncompressed sources without one.
-                (void)VulkanEngine::FileLoaders::Textures::GenerateCpuMipChain(ready.data);
+                ready.format = ready.data.source_format;
             }
+        } else {
+            // Fill in a CPU mip chain for uncompressed sources without one.
+            (void)VulkanEngine::FileLoaders::Textures::GenerateCpuMipChain(ready.data);
         }
+    }
 
-        --in_flight_;
+    {
         std::lock_guard lock(ready_mutex_);
         ready_.push_back(std::move(ready));
     }
+    in_flight_.fetch_sub(1, std::memory_order_acq_rel);
 }
 
 void TextureUploader::BeginFrame(std::uint32_t frame_index,
@@ -375,8 +354,7 @@ std::uint64_t TextureUploader::RecordUploads(vk::CommandBuffer cmd, std::uint32_
 }
 
 std::uint32_t TextureUploader::PendingCount() const {
-    std::lock_guard lock(work_mutex_);
-    return static_cast<std::uint32_t>(work_queue_.size());
+    return in_flight_.load(std::memory_order_acquire);
 }
 
 } // namespace VulkanEngine::Textures

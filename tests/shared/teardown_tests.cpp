@@ -21,7 +21,7 @@ struct SafeOrder {
 };
 
 TEST(TeardownScheduler, RunsAllTasks) {
-    TeardownScheduler teardown{4};
+    TeardownScheduler teardown{};
     std::atomic<int> count{0};
     for (int i = 0; i < 8; ++i) {
         teardown.Add("task" + std::to_string(i), [&] { count.fetch_add(1); });
@@ -31,7 +31,7 @@ TEST(TeardownScheduler, RunsAllTasks) {
 }
 
 TEST(TeardownScheduler, DependencyOrdering) {
-    TeardownScheduler teardown{4};
+    TeardownScheduler teardown{};
     SafeOrder order;
 
     // b depends on a; c depends on b -> execution must be a, b, c.
@@ -50,7 +50,7 @@ TEST(TeardownScheduler, DependencyOrdering) {
 }
 
 TEST(TeardownScheduler, IndependentTasksCanRunConcurrently) {
-    TeardownScheduler teardown{4};
+    TeardownScheduler teardown{};
     std::atomic<int> active{0};
     std::atomic<int> max_active{0};
     std::atomic<int> completed{0};
@@ -76,7 +76,7 @@ TEST(TeardownScheduler, IndependentTasksCanRunConcurrently) {
 }
 
 TEST(TeardownScheduler, ExceptionCapturedAndRethrown) {
-    TeardownScheduler teardown{4};
+    TeardownScheduler teardown{};
     std::atomic<int> ran{0};
     teardown.Add("ok", [&] { ran.fetch_add(1); });
     teardown.Add("boom", [] { throw std::runtime_error("boom"); });
@@ -88,21 +88,21 @@ TEST(TeardownScheduler, ExceptionCapturedAndRethrown) {
 }
 
 TEST(TeardownScheduler, AddAfterRunThrows) {
-    TeardownScheduler teardown{2};
+    TeardownScheduler teardown{};
     teardown.Add("a", [] {});
     teardown.Run();
     EXPECT_THROW(teardown.Add("late", [] {}), std::logic_error);
 }
 
 TEST(TeardownScheduler, OutOfRangeDependencyThrows) {
-    TeardownScheduler teardown{2};
+    TeardownScheduler teardown{};
     teardown.Add("a", [] {});
     // Dependencies must refer to already-added tasks.
     EXPECT_THROW(teardown.Add("b", [] {}, {5}), std::out_of_range);
 }
 
 TEST(TeardownScheduler, RunIsIdempotent) {
-    TeardownScheduler teardown{2};
+    TeardownScheduler teardown{};
     std::atomic<int> ran{0};
     teardown.Add("a", [&] { ran.fetch_add(1); });
     teardown.Run();

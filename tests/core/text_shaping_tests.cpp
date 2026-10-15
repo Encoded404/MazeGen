@@ -3,7 +3,7 @@
 import std;
 import std.compat;
 
-import VulkanShared.ThreadPool;
+import VulkanShared.Jobs;
 
 import FileLoader.Types;
 import VulkanEngine.ResourceSystem;
@@ -352,7 +352,7 @@ TEST_F(ShapingCacheTest, IsSafeToShapeFromManyThreads) {
     std::atomic<std::size_t> advance_mismatches{0};
     std::atomic<std::size_t> cluster_mismatches{0};
 
-    auto& pool = VulkanShared::ThreadPool::Global();
+    auto& pool = VulkanShared::JobScheduler::Global();
     pool.ParallelFor(kRounds, [&](std::size_t round) {
         const std::string& text = texts[round % texts.size()];
         const auto run = cache.Shape(*face_, text);

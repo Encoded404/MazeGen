@@ -78,6 +78,10 @@ public:
 
 private:
     bool LoadSpirvFromDisk(ShaderModuleSlot& slot);
+    // Synchronous reload of one slot (recompile or re-read the .spv, then
+    // publish the module). Runs on the shared compute pool; never inline on the
+    // frame thread.
+    bool ReloadShader(ShaderId id);
 
     const vk::raii::Device& device_;
     vk::raii::PipelineCache cache_{nullptr};

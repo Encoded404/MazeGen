@@ -9,7 +9,6 @@ import std;
 import std.compat;
 
 import FileLoader.Types;
-import VulkanShared.ThreadPool;
 
 import VulkanEngine.Text.Font;
 import VulkanEngine.Text.Atlas;
@@ -89,7 +88,7 @@ struct RasterGlyph {
 // concurrently -- it carries the size, transform, and glyph slot that a load
 // mutates -- and that the documented pattern is one FT_Library per thread.
 // `thread_local` is the obvious spelling of that and is the wrong one here: the
-// global ThreadPool outlives and joins its workers, and a thread_local FT_Library
+// global JobScheduler outlives and joins its workers, and a thread_local FT_Library
 // destructor would then run during engine teardown while the pool may still be
 // running a job, and on a thread the engine does not own. Worse, a worker that
 // has gone idle would keep its library and every face it ever parsed alive for
@@ -215,7 +214,7 @@ private:
 //
 // Rasterization runs on whatever thread calls in, using a pooled FT_Library from
 // FtLibraryPool, so a batch of glyphs can be produced by
-// ThreadPool::ParallelFor. Results are cached in a bounded, thread-safe LRU
+// JobScheduler::ParallelFor. Results are cached in a bounded, thread-safe LRU
 // keyed on the exact identity of the request -- face identity and resource
 // version, glyph id, the *quantized* pixel size, and the hinting mode -- so the
 // same glyph at the same size is rendered once per process rather than once per

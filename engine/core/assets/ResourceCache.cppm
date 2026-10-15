@@ -10,7 +10,7 @@ import std;
 import logiface;
 import FileLoader;
 import FileLoader.DefaultFileReadStrategy;
-import VulkanShared.ThreadPool;
+import VulkanShared.Jobs;
 
 export namespace VulkanEngine {
 
@@ -90,9 +90,16 @@ struct ResourceId {
         std::unordered_map<std::type_index,
                            std::unordered_map<std::string, InProgressEntry>> inProgress_;
 
+        // The FileManager's CPU continuations (stream assembly and the final
+        // publish of a loaded resource) are compute, not IO: they run on the
+        // shared pool's Background tier, so a burst of asset loads can never
+        // delay queued simulation or per-frame work.
         FileLoader::FileManager file_manager_{
             std::make_shared<FileLoader::DefaultFileReadStrategy>(),
-            [](auto work) { static_cast<void>(VulkanShared::ThreadPool::Global().Enqueue(std::move(work))); }
+            [](FileLoader::FileManager::CpuWork work) {
+                VulkanShared::JobScheduler::Global().Submit(
+                    VulkanShared::Tier::Background, "resource-assemble", std::move(work));
+            }
         };
 
     public:
@@ -341,7 +348,12 @@ struct ResourceId {
                 refCounts_[type_idx][resource_id.value].refCount = 1;
             }
 
-            std::thread([this, type_idx, resource_id, internal_fut, out_promise]() mutable {
+            // Bounded IO lane, not one detached thread per load: a 500-asset
+            // async scene load must not create 500 threads. This body waits on
+            // the read/assemble future (which resolves on the compute pool) and
+            // then publishes the resource, so it is a waiter, not compute.
+            VulkanShared::IoExecutor::Global().Post(
+                [this, type_idx, resource_id, internal_fut, out_promise]() mutable {
                 try {
                     auto res_ptr = internal_fut.get();
                     if (!res_ptr) {
@@ -376,7 +388,7 @@ struct ResourceId {
                     refCounts_[type_idx].erase(resource_id.value);
                     out_promise->set_exception(std::current_exception());
                 }
-            }).detach();
+                });
 
             return out_fut;
         }

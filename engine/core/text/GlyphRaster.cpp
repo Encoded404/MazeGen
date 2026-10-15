@@ -9,7 +9,7 @@ import std;
 import std.compat;
 
 import FileLoader.Types;
-import VulkanShared.ThreadPool;
+import VulkanShared.Jobs;
 
 import VulkanEngine.Text.Font;
 import VulkanEngine.Text.Atlas;
@@ -131,7 +131,7 @@ std::size_t FtLibraryPool::FaceKeyHash::operator()(const FaceKey& key) const noe
 }
 
 FtLibraryPool::FtLibraryPool()
-    : FtLibraryPool(std::max<std::size_t>(1, VulkanShared::ThreadPool::Global().ThreadCount())) {}
+    : FtLibraryPool(std::max<std::size_t>(1, VulkanShared::JobScheduler::Global().WorkerCount())) {}
 
 FtLibraryPool::FtLibraryPool(std::size_t slot_count) {
     slots_.resize(std::max<std::size_t>(slot_count, 1));

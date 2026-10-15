@@ -25,10 +25,10 @@ if(CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
             CallbackList.cppm
             DeviceScope.cppm
             FileIO.cppm
+            Jobs.cppm
             ScopedTimer.cppm
             Storage.cppm
             Teardown.cppm
-            ThreadPool.cppm
             Timer.cppm
             UserPaths.cppm
             render_graph/RenderGraphTypes.cppm
@@ -36,6 +36,7 @@ if(CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
 endif()
 
 target_sources(VulkanShared PRIVATE
+    Jobs.cpp
     Timer.cpp
 )
 

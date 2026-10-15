@@ -11,7 +11,7 @@ import logiface;
 import vulkan;
 
 import VulkanShared.FileIO;
-import VulkanShared.ThreadPool;
+import VulkanShared.Jobs;
 import VulkanShared.UserPaths;
 import VulkanEngine.CompilerEngine;
 import VulkanEngine.ShaderLoader;
@@ -168,68 +168,77 @@ std::uint64_t ShaderManager::GetVersion(ShaderId id) const {
 }
 
 std::future<bool> ShaderManager::RequestReload(ShaderId id) {
-    return VulkanShared::ThreadPool::Global().Enqueue([this, id]() -> bool {
-        ShaderModuleSlot* slot = nullptr;
-        {
-            std::shared_lock lock(slots_mutex_);
-            slot = slots_[id].get();
-        }
+    // Compilation runs on the shared compute pool and yields to any queued
+    // realtime (simulation) work; the future carries the outcome back.
+    auto task = std::make_shared<std::packaged_task<bool()>>(
+        [this, id]() -> bool { return ReloadShader(id); });
+    auto future = task->get_future();
+    VulkanShared::JobScheduler::Global().Submit(
+        VulkanShared::Tier::Compute, "shader-reload", [task] { (*task)(); });
+    return future;
+}
 
-        std::vector<std::uint32_t> spirv;
+bool ShaderManager::ReloadShader(ShaderId id) {
+    ShaderModuleSlot* slot = nullptr;
+    {
+        std::shared_lock lock(slots_mutex_);
+        slot = slots_[id].get();
+    }
+
+    std::vector<std::uint32_t> spirv;
 #if VKENGINE_HOT_RELOAD
-        VulkanEngine::ShaderSystem::CompileRequest req{};
-        req.source_path = slot->slang_path;
-        // The slot's own entry point: a variant row recompiles its wrapper, not
-        // "main" (which would clobber the variant's module).
-        req.entry_point = slot->entry_point;
-        req.stage = slot->stage;
-        req.optimization_level = 0;
+    VulkanEngine::ShaderSystem::CompileRequest req{};
+    req.source_path = slot->slang_path;
+    // The slot's own entry point: a variant row recompiles its wrapper, not
+    // "main" (which would clobber the variant's module).
+    req.entry_point = slot->entry_point;
+    req.stage = slot->stage;
+    req.optimization_level = 0;
 
-        auto result = CompilerEngine::Compile(req);
-        if (!result.has_value()) {
-            LOGIFACE_LOG(error, std::format("ShaderManager: compilation failed: {}", result.error()));
-            return false;
-        }
+    auto result = CompilerEngine::Compile(req);
+    if (!result.has_value()) {
+        LOGIFACE_LOG(error, std::format("ShaderManager: compilation failed: {}", result.error()));
+        return false;
+    }
 
-        if (!slot->manual && result->binding_hash != slot->binding_hash) {
-            LOGIFACE_LOG(error, std::format("ShaderManager: {} — bindings changed, C++ rebuild required", slot->slang_path));
-            return false;
-        }
+    if (!slot->manual && result->binding_hash != slot->binding_hash) {
+        LOGIFACE_LOG(error, std::format("ShaderManager: {} — bindings changed, C++ rebuild required", slot->slang_path));
+        return false;
+    }
 
-        spirv = std::move(result->spirv);
-        LOGIFACE_LOG(debug, std::format("ShaderManager: recompiled {} ({} bytes, stage {})",
-                                        slot->slang_path, spirv.size() * sizeof(std::uint32_t),
-                                        static_cast<std::uint32_t>(slot->stage)));
-        VulkanShared::FileIO::WriteBinary(slot->spv_path,
-            std::span{reinterpret_cast<const std::byte*>(spirv.data()),
-                      spirv.size() * sizeof(std::uint32_t)});
+    spirv = std::move(result->spirv);
+    LOGIFACE_LOG(debug, std::format("ShaderManager: recompiled {} ({} bytes, stage {})",
+                                    slot->slang_path, spirv.size() * sizeof(std::uint32_t),
+                                    static_cast<std::uint32_t>(slot->stage)));
+    VulkanShared::FileIO::WriteBinary(slot->spv_path,
+        std::span{reinterpret_cast<const std::byte*>(spirv.data()),
+                  spirv.size() * sizeof(std::uint32_t)});
 #else
-        auto spirv_result = VulkanEngine::ShaderLoader::ShaderLoader::LoadSpirv(slot->spv_path);
-        if (!spirv_result) {
-            LOGIFACE_LOG(error, std::format("ShaderManager: reload failed for {}: {}", slot->spv_path, spirv_result.error()));
-            return false;
-        }
-        spirv = std::move(*spirv_result);
+    auto spirv_result = VulkanEngine::ShaderLoader::ShaderLoader::LoadSpirv(slot->spv_path);
+    if (!spirv_result) {
+        LOGIFACE_LOG(error, std::format("ShaderManager: reload failed for {}: {}", slot->spv_path, spirv_result.error()));
+        return false;
+    }
+    spirv = std::move(*spirv_result);
 #endif
 
-        // Create the module off-lock, then publish it atomically with the version
-        // bump. Readers (GetModule/GetVersion/GetSlot) take the shared lock, and
-        // runtime pipeline creation is gated on GetVersion() changing, so the
-        // retired module has no live consumers when it is destroyed here.
-        vk::ShaderModuleCreateInfo info({},
-            spirv.size() * sizeof(std::uint32_t), spirv.data());
-        vk::raii::ShaderModule new_module(device_, info);
-        {
-            std::unique_lock lock(slots_mutex_);
-            slot->module = std::move(new_module);
-            slot->loaded = true;
-            slot->version.fetch_add(1, std::memory_order_release);
-        }
-        LOGIFACE_LOG(debug, std::format("ShaderManager: hot-reloaded {} -> v{}",
-                                        slot->slang_path,
-                                        slot->version.load(std::memory_order_acquire)));
-        return true;
-    });
+    // Create the module off-lock, then publish it atomically with the version
+    // bump. Readers (GetModule/GetVersion/GetSlot) take the shared lock, and
+    // runtime pipeline creation is gated on GetVersion() changing, so the
+    // retired module has no live consumers when it is destroyed here.
+    vk::ShaderModuleCreateInfo info({},
+        spirv.size() * sizeof(std::uint32_t), spirv.data());
+    vk::raii::ShaderModule new_module(device_, info);
+    {
+        std::unique_lock lock(slots_mutex_);
+        slot->module = std::move(new_module);
+        slot->loaded = true;
+        slot->version.fetch_add(1, std::memory_order_release);
+    }
+    LOGIFACE_LOG(debug, std::format("ShaderManager: hot-reloaded {} -> v{}",
+                                    slot->slang_path,
+                                    slot->version.load(std::memory_order_acquire)));
+    return true;
 }
 
 std::future<bool> ShaderManager::RequestReloadByPath(std::string_view slang_path) {
@@ -242,20 +251,30 @@ std::future<bool> ShaderManager::RequestReloadByPath(std::string_view slang_path
     if (ids.size() == 1) {
         return RequestReload(ids.front());
     }
-    // Several variants share this source: reload them all and aggregate.
-    std::vector<std::future<bool>> futures;
-    futures.reserve(ids.size());
+
+    // Several variants share this source: reload them all on the pool and
+    // resolve once the last one finishes. Aggregating futures from inside a
+    // pool job would stall a single-worker pool behind work it is itself
+    // waiting for, so the batch is counted rather than awaited.
+    struct Batch {
+        std::atomic<std::size_t> remaining{0};
+        std::atomic<bool> ok{true};
+        std::promise<bool> promise;
+    };
+    auto batch = std::make_shared<Batch>();
+    batch->remaining.store(ids.size());
+    auto future = batch->promise.get_future();
     for (const ShaderId id : ids) {
-        futures.push_back(RequestReload(id));
+        VulkanShared::JobScheduler::Global().Submit(
+            VulkanShared::Tier::Compute, "shader-reload-batch",
+            [this, id, batch] {
+                if (!ReloadShader(id)) batch->ok.store(false);
+                if (batch->remaining.fetch_sub(1, std::memory_order_acq_rel) == 1) {
+                    batch->promise.set_value(batch->ok.load());
+                }
+            });
     }
-    return VulkanShared::ThreadPool::Global().Enqueue(
-        [futures = std::move(futures)]() mutable -> bool {
-            bool ok = true;
-            for (auto& f : futures) {
-                ok = f.get() && ok;
-            }
-            return ok;
-        });
+    return future;
 }
 
 vk::PipelineCache ShaderManager::GetPipelineCache() const {

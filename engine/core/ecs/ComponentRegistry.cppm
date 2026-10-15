@@ -38,7 +38,7 @@ import std.compat;
 
 export import VulkanEngine.ECS.Entity;
 
-import VulkanShared.ThreadPool;
+import VulkanShared.Jobs;
 
 export namespace VulkanEngine {
 
@@ -447,7 +447,7 @@ public:
         }
         if (components.empty()) return;
 
-        VulkanShared::ThreadPool::Global().ParallelFor(components.size(),
+        VulkanShared::JobScheduler::Global().ParallelFor(components.size(),
             [delta_time, components = std::move(components)](const std::size_t index) mutable {
                 components[index]->Update(delta_time);
             });

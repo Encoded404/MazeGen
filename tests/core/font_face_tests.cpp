@@ -3,7 +3,7 @@
 import std;
 import std.compat;
 
-import VulkanShared.ThreadPool;
+import VulkanShared.Jobs;
 
 import FileLoader.Types;
 import VulkanEngine.ResourceSystem;
@@ -188,7 +188,7 @@ TEST_F(FontFaceTest, IsSafeToQueryFromManyThreadsAtOnce) {
     std::atomic<std::size_t> mismatches{0};
     std::atomic<std::size_t> glyph_mismatches{0};
 
-    auto& pool = VulkanShared::ThreadPool::Global();
+    auto& pool = VulkanShared::JobScheduler::Global();
     pool.ParallelFor(kRounds, [&](std::size_t) {
         for (std::size_t i = 0; i < codepoints.size(); ++i) {
             const std::uint32_t glyph = face_->GlyphForCodepoint(codepoints[i]);

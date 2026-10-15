@@ -4,6 +4,8 @@ export module VulkanShared.Teardown;
 
 import std;
 
+import VulkanShared.Jobs;
+
 export namespace VulkanShared {
 
 /// Identifier for a task registered with a TeardownScheduler.
@@ -18,16 +20,19 @@ using TeardownId = std::size_t;
 /// be encoded (e.g. "destroy the shared backend only after the system that
 /// holds the last reference has been torn down").
 ///
+/// The graph runs on the engine's shared compute pool, so the shutdown path no
+/// longer spawns a second, ephemeral thread population with its own sizing
+/// policy: a task is a dependency-counted job plus an edge to each dependent,
+/// and `Run()` drains the graph with participating waits.
+///
 /// Rules:
 ///   - Add all tasks before calling `Run()` (Add after Run throws).
-///   - `Run()` joins every worker before returning and rethrows the first task
-///     exception once the whole batch has been attempted, so the caller knows
-///     every destruction finished before the Vulkan device/instance are
-///     released.
+///   - `Run()` returns only once every task has been attempted, and rethrows the
+///     first task exception, so the caller knows every destruction finished
+///     before the Vulkan device/instance are released.
 class TeardownScheduler {
 public:
-    explicit TeardownScheduler(std::size_t worker_count)
-        : worker_count_(std::clamp<std::size_t>(worker_count, 1, 16)) {}
+    TeardownScheduler() = default;
 
     TeardownScheduler(const TeardownScheduler&) = delete;
     TeardownScheduler& operator=(const TeardownScheduler&) = delete;
@@ -73,39 +78,62 @@ public:
             run_ = true;
             if (HasCycle()) {
                 cycle_ = true;
-            } else {
-                for (std::size_t i = 0; i < tasks_.size(); ++i) {
-                    if (tasks_[i].pending_deps == 0) {
-                        ready_.push_back(i);
-                    }
-                }
-                remaining_ = tasks_.size();
             }
         }
         if (cycle_) {
             throw std::logic_error("TeardownScheduler: dependency cycle detected");
         }
-        if (remaining_ == 0) {
-            std::exception_ptr err = first_exception_;
-            if (err) {
-                std::rethrow_exception(err);
-            }
+        if (tasks_.empty()) {
             return;
         }
 
-        std::vector<std::thread> workers;
-        workers.reserve(worker_count_);
-        const std::size_t spawn = std::min(worker_count_, tasks_.size());
-        for (std::size_t i = 0; i < spawn; ++i) {
-            workers.emplace_back([this] { WorkerLoop(); });
-        }
-        for (auto& worker : workers) {
-            worker.join();
+        JobScheduler& scheduler = JobScheduler::Global();
+
+        // The batch is shared, not captured per job: a task must be able to
+        // release the dependencies of the tasks that follow it by handle, and
+        // those handles do not exist until every job has been created.
+        struct Batch {
+            std::vector<JobHandle> handles;
+            std::mutex mutex;
+            std::exception_ptr first_error;
+        };
+        auto batch = std::make_shared<Batch>();
+        batch->handles.resize(tasks_.size());
+
+        for (std::size_t i = 0; i < tasks_.size(); ++i) {
+            const auto dependencies = static_cast<std::uint32_t>(tasks_[i].pending_deps);
+            batch->handles[i] = scheduler.CreateJob(
+                JobScheduler::JobDesc{
+                    Tier::Compute, "teardown",
+                    [this, batch, i, &scheduler] {
+                        try {
+                            if (tasks_[i].fn) tasks_[i].fn();
+                        } catch (...) {
+                            const std::lock_guard lock(batch->mutex);
+                            if (batch->first_error == nullptr) {
+                                batch->first_error = std::current_exception();
+                            }
+                        }
+                        // Release dependents even when the task failed: a
+                        // teardown batch must never deadlock on a broken task.
+                        for (const TeardownId dependent : tasks_[i].dependents) {
+                            scheduler.RemoveDependency(batch->handles[dependent]);
+                        }
+                    }},
+                dependencies);
         }
 
-        std::exception_ptr err = first_exception_;
-        if (err) {
-            std::rethrow_exception(err);
+        for (JobHandle& handle : batch->handles) scheduler.QueueJob(handle);
+        for (JobHandle& handle : batch->handles) scheduler.Wait(handle);
+        for (JobHandle& handle : batch->handles) scheduler.FreeJob(handle);
+
+        std::exception_ptr error;
+        {
+            const std::lock_guard lock(batch->mutex);
+            error = batch->first_error;
+        }
+        if (error) {
+            std::rethrow_exception(error);
         }
     }
 
@@ -117,7 +145,7 @@ private:
         std::vector<TeardownId> dependents{};
     };
 
-    [[nodiscard]] bool HasCycle() {
+    [[nodiscard]] bool HasCycle() const {
         std::vector<std::size_t> indegree(tasks_.size());
         for (std::size_t i = 0; i < tasks_.size(); ++i) {
             indegree[i] = tasks_[i].pending_deps;
@@ -142,55 +170,10 @@ private:
         return processed != tasks_.size();
     }
 
-    void WorkerLoop() {
-        for (;;) {
-            TeardownId id{};
-            {
-                std::unique_lock lock(mutex_);
-                cv_.wait(lock, [this] { return !ready_.empty() || remaining_ == 0; });
-                if (remaining_ == 0 && ready_.empty()) {
-                    return;
-                }
-                id = ready_.front();
-                ready_.pop_front();
-            }
-            ExecuteTask(id);
-        }
-    }
-
-    void ExecuteTask(TeardownId id) {
-        std::exception_ptr error{};
-        try {
-            if (tasks_[id].fn) {
-                tasks_[id].fn();
-            }
-        } catch (...) {
-            error = std::current_exception();
-        }
-        {
-            std::lock_guard lock(mutex_);
-            if (error && first_exception_ == nullptr) {
-                first_exception_ = error;
-            }
-            --remaining_;
-            for (const TeardownId v : tasks_[id].dependents) {
-                if (--tasks_[v].pending_deps == 0) {
-                    ready_.push_back(v);
-                }
-            }
-        }
-        cv_.notify_all();
-    }
-
     std::vector<Task> tasks_;
-    std::deque<TeardownId> ready_;
-    std::size_t remaining_ = 0;
-    std::size_t worker_count_ = 2;
     std::mutex mutex_;
-    std::condition_variable cv_;
     bool run_ = false;
     bool cycle_ = false;
-    std::exception_ptr first_exception_{};
 };
 
 /// Runs `fn` on a detached worker thread (fire-and-forget).

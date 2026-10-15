@@ -3,7 +3,7 @@
 import std;
 import std.compat;
 
-import VulkanShared.ThreadPool;
+import VulkanShared.Jobs;
 
 import FileLoader.Types;
 import VulkanEngine.ResourceSystem;
@@ -373,7 +373,7 @@ TEST_F(GlyphRasterTest, RasterizesIdenticallyAcrossThreads) {
 
     GlyphRasterizer pooled{AtlasConfig{}, 256};
     std::vector<std::shared_ptr<const RasterGlyph>> actual(requests.size());
-    auto& pool = VulkanShared::ThreadPool::Global();
+    auto& pool = VulkanShared::JobScheduler::Global();
     pool.ParallelFor(requests.size(), [&](std::size_t index) {
         const Request& request = requests[index];
         actual[index] = pooled.Get(*face_, request.glyph_id, request.pixel_size);
@@ -424,7 +424,7 @@ TEST_F(GlyphRasterTest, PoolServesConcurrentLeases) {
 
     constexpr std::size_t kRounds = 128;
     std::atomic<std::size_t> failures{0};
-    auto& threads = VulkanShared::ThreadPool::Global();
+    auto& threads = VulkanShared::JobScheduler::Global();
     threads.ParallelFor(kRounds, [&](std::size_t) {
         auto lease = pool.Acquire();
         if (!lease.IsValid()) {

@@ -5,6 +5,8 @@ export module VulkanEngine.EngineContext;
 import std;
 import vulkan;
 
+import VulkanShared.Jobs;
+
 import VulkanEngine.ECS.ComponentRegistry;
 import VulkanEngine.BindlessManager;
 import VulkanEngine.TextureUploader;
@@ -58,6 +60,12 @@ struct GameConfig {
     // VK_EXT_memory_budget heap budget when present, otherwise disable
     // eviction". Set it to force a budget (or a smaller one) on any device.
     std::uint64_t texture_memory_budget_bytes = 0;
+    // Shared compute-pool worker count — the engine's single thread budget for
+    // everything compute-hungry (ECS updates, decode, compiles, physics). The
+    // default picks `hardware_concurrency - 1`; `0` collapses every parallel
+    // path onto the calling thread, which is the bit-identical deterministic
+    // debugging mode.
+    unsigned int job_workers = VulkanShared::JobBudget::kAuto;
     bool enable_imgui = true;
     std::string shader_data_dir;
     // Empty means "the resolved per-user cache root" (see GameEngine::Setup).
