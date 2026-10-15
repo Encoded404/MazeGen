@@ -19,6 +19,14 @@ ctest --preset debug
 - The `windows` preset sets `BUILD_TESTING=OFF` and `VKENGINE_HOT_RELOAD=OFF`.
 - Compiler is Clang only; C++23 modules (`import std;`) are used throughout, with
   libc++ (`USE_LIBCPP=ON` in the default preset).
+- Slang/hot-reload is gated by two knobs: `VKENGINE_HOT_RELOAD` (Debug always,
+  when ON) and `VKENGINE_HOT_RELOAD_RELWITHDEBINFO` (default ON; set OFF to
+  ship a slang-free RelWithDebInfo). Slang-free configurations
+  (`VKENGINE_STATIC_LIBCPP`, default ON) statically embed libc++ + libc++abi
+  via the `project_libcpp_static` interface target, which every C++ executable
+  must link last; the static link requires the `libcxx-static` archive
+  (`libc++.a`), else configure warns and falls back to the dynamic link.
+  Build-time host tools (slang-spirv-compiler) stay fully dynamic.
 - Never add per-command `cd`; pass the working directory to the tool instead.
 
 ## Test conventions

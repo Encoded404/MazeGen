@@ -102,22 +102,30 @@ target_link_libraries(${ENGINE_TARGET} PRIVATE
 # recompilation is lost. Shaders are compiled ahead of time by the host
 # slang-spirv-compiler tool (which runs on the build machine) in every
 # configuration.
-if(WIN32)
-    set(_vkengine_hot_reload_default OFF)
-else()
-    set(_vkengine_hot_reload_default ON)
-endif()
-option(VKENGINE_HOT_RELOAD "Enable Slang SDK for runtime shader compilation (Debug/RelWithDebInfo)" ${_vkengine_hot_reload_default})
+#
+# VKENGINE_HOT_RELOAD and VKENGINE_HOT_RELOAD_RELWITHDEBINFO are declared in
+# the top-level CMakeLists, before the static-libc++ decision, because the
+# slang-free configuration list of project_libcpp_static is derived from them.
+# Release is always slang-free; RelWithDebInfo follows
+# VKENGINE_HOT_RELOAD_RELWITHDEBINFO, so a RelWithDebInfo build can be shipped
+# without slang (and with a statically linked libc++, see project_libcpp_static).
 if(VKENGINE_HOT_RELOAD)
     find_package(slang CONFIG REQUIRED)
     # The macro selects between the real CompilerEngine::Compile and the stub,
     # so the define and the link must be gated by the exact same condition: a
     # configuration compiled against the Slang API needs the shared library,
     # and one compiled without it must not acquire a DT_NEEDED on it.
+    set(_vkengine_hot_reload_configs "Debug")
+    if(VKENGINE_HOT_RELOAD_RELWITHDEBINFO)
+        list(APPEND _vkengine_hot_reload_configs "RelWithDebInfo")
+    endif()
+    list(JOIN _vkengine_hot_reload_configs "," _vkengine_hot_reload_configs_gx)
     target_link_libraries(${ENGINE_TARGET} PRIVATE
-        "$<$<CONFIG:Debug,RelWithDebInfo>:slang::slang>")
+        "$<$<CONFIG:${_vkengine_hot_reload_configs_gx}>:slang::slang>")
     target_compile_definitions(${ENGINE_TARGET} PRIVATE
-        "$<$<CONFIG:Debug,RelWithDebInfo>:VKENGINE_HOT_RELOAD=1>")
+        "$<$<CONFIG:${_vkengine_hot_reload_configs_gx}>:VKENGINE_HOT_RELOAD=1>")
+    unset(_vkengine_hot_reload_configs)
+    unset(_vkengine_hot_reload_configs_gx)
 endif()
 
 # ── PhysicalCamera (webcam) support ─────────────────────────────────────

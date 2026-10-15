@@ -20,6 +20,9 @@ endif()
 target_link_options(crash_probe PRIVATE
   $<$<NOT:$<CXX_COMPILER_ID:MSVC>>:-Wl,--gc-sections>
 )
+if(TARGET project_libcpp_static)
+  target_link_libraries(crash_probe PRIVATE project_libcpp_static)
+endif()
 
 add_executable(crash_tests
   crash_handler_tests.cpp

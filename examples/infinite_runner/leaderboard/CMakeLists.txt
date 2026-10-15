@@ -123,3 +123,9 @@ endif()
 if(TARGET project_size)
     target_link_libraries(leaderboard_server PRIVATE project_size)
 endif()
+# Statically linked libc++/libc++abi for the slang-free configurations (see
+# project_libcpp_static); keeps the shipped server's runtime linkage identical
+# to the examples'.
+if(TARGET project_libcpp_static)
+    target_link_libraries(leaderboard_server PRIVATE project_libcpp_static)
+endif()

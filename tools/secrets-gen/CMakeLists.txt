@@ -33,3 +33,10 @@ if(CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
         RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin"
     )
 endif()
+
+# Statically linked libc++/libc++abi for the slang-free configurations (see
+# project_libcpp_static in the top-level CMakeLists; the target only exists
+# there, not in standalone cross-builds, which keep the dynamic link).
+if(TARGET project_libcpp_static)
+    target_link_libraries(secrets-gen PRIVATE project_libcpp_static)
+endif()

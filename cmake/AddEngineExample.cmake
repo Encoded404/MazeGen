@@ -233,6 +233,13 @@ function(add_engine_example NAME)
     if(TARGET project_size)
         target_link_libraries(${NAME} PRIVATE project_size)
     endif()
+    # Statically linked libc++/libc++abi for the slang-free configurations
+    # (see project_libcpp_static). Kept last on purpose: the static
+    # libc++abi archive item should trail the other link inputs so archive
+    # members are pulled for all their pending users.
+    if(TARGET project_libcpp_static)
+        target_link_libraries(${NAME} PRIVATE project_libcpp_static)
+    endif()
 
     # Release deliverables ship without a symbol table: .symtab/.strtab alone
     # is ~1.5 MB on an example binary and carries nothing the program needs at

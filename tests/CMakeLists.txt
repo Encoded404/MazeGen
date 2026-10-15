@@ -54,6 +54,12 @@ function(setup_test_target TARGET)
   if(TARGET project_size)
     target_link_libraries(${TARGET} PRIVATE project_size)
   endif()
+  # Statically linked libc++/libc++abi for the slang-free configurations (see
+  # project_libcpp_static); also keeps Release test runs exercising the same
+  # runtime linkage a shipped configuration uses.
+  if(TARGET project_libcpp_static)
+    target_link_libraries(${TARGET} PRIVATE project_libcpp_static)
+  endif()
   if(ARG_LABELS)
     set(TEST_LABELS "${ARG_LABELS}")
   else()

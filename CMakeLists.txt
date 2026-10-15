@@ -176,6 +176,31 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
+# ── Hot-reload (in-process Slang) configuration ─────────────────────────
+# Declared here instead of in engine/core because the static-libc++ decision
+# (the project_libcpp_static target below) needs these values at configure
+# time: whichever configurations ship slang/hot-reload must keep the dynamic
+# libc++ link, because slang's official shared libraries are built against
+# libstdc++ and pulling it into a process that also carries a statically
+# linked libc++ would be exactly the "more than one C++ runtime copy in the
+# process" situation Steam's Linux runtime forbids. Release therefore never
+# gets slang (shaders are precompiled to .spv by the build-time host tool in
+# every configuration); RelWithDebInfo gets it only while
+# VKENGINE_HOT_RELOAD_RELWITHDEBINFO is ON, so a RelWithDebInfo build can
+# also be shipped slang-free.
+if(WIN32)
+    set(_vkengine_hot_reload_default OFF)
+else()
+    set(_vkengine_hot_reload_default ON)
+endif()
+option(VKENGINE_HOT_RELOAD
+    "Enable Slang SDK for runtime shader compilation (Debug and, when VKENGINE_HOT_RELOAD_RELWITHDEBINFO is ON, RelWithDebInfo)"
+    ${_vkengine_hot_reload_default})
+unset(_vkengine_hot_reload_default)
+option(VKENGINE_HOT_RELOAD_RELWITHDEBINFO
+    "Keep hot reload (in-process slang) enabled in RelWithDebInfo as well (OFF = RelWithDebInfo is slang-free, like Release)"
+    ON)
+
 # Verify libc++ availability (only valid after project() — we now know the compiler)
 if(USE_LIBCPP)
 	if(CMAKE_CXX_COMPILER_ID MATCHES "Clang")
@@ -208,6 +233,94 @@ if(USE_LIBCPP)
 
 			# Linker flag is not automatically propagated from CMAKE_CXX_FLAGS.
 			add_link_options(-stdlib=libc++)
+
+			# ── Statically linked libc++ (Steam Linux Runtime readiness) ──
+			#
+			# Steam's Linux runtime combines application libraries with the
+			# host's graphics drivers, and libstdc++/libgcc sit inside the
+			# driver dependency stack: bundling (or letting several shared
+			# objects each require) a copy of a C++ runtime in the process is
+			# how the well-known driver crashes happen. Valve's guidance for
+			# game developers is to statically link such libraries instead.
+			#
+			# This project targets libc++, whose Mesa/NVIDIA crash-mode does
+			# not exist (drivers use libstdc++), so statically embedding
+			# libc++ and libc++abi satisfies the "one C++ runtime copy" rule
+			# vacuously: the executable carries its copy, and no shared
+			# libc++ exists in the process at all. License-wise this is clean
+			# (libc++ is Apache-2.0-with-LLVM-exception).
+			#
+			# It is applied exactly to the slang-free configurations
+			# (_static_libcpp_configs): Debug keeps the dynamic link (Address
+			# Sanitizer cannot intercept a statically linked libc++), and
+			# configurations that load slang's libstdc++-based shared
+			# libraries keep it too, so no C++ runtime is multiplied.
+			#
+			# Mechanics:
+			#   * -static-libstdc++ is clang's unified flag; with
+			#     -stdlib=libc++ the driver emits "-Bstatic -lc++ -Bdynamic"
+			#     after every user library (verified via -###) and adds no
+			#     dynamic -lc++ beside it. The driver never adds -lc++abi, so
+			#     the archive is supplied explicitly.
+			#   * -Wl,-Bstatic,-lc++abi,-Bdynamic is carried by the
+			#     project_libcpp_static INTERFACE target, which every C++
+			#     executable links LAST. Position matters: a static archive
+			#     only satisfies undefined symbols pending at its position
+			#     (except that modern GNU ld rescan and lld's lazy archive
+			#     resolution fix up a too-early position; a too-late
+			#     position is always safe).
+			#   * build-time host tools (the slang-spirv-compiler tool links
+			#     slang itself) deliberately do NOT link this target: they
+			#     stay fully dynamic.
+			option(VKENGINE_STATIC_LIBCPP
+				"Statically link libc++ and libc++abi into slang-free configurations (Release, and RelWithDebInfo when VKENGINE_HOT_RELOAD_RELWITHDEBINFO is off)"
+				ON)
+			set(_static_libcpp_configs "Release")
+			if(NOT (VKENGINE_HOT_RELOAD AND VKENGINE_HOT_RELOAD_RELWITHDEBINFO))
+				list(APPEND _static_libcpp_configs "RelWithDebInfo")
+			endif()
+			list(JOIN _static_libcpp_configs "," _static_libcpp_configs_gx)
+
+			# Always provide the hook target so executable-creating helpers
+			# can link it unconditionally; it is a no-op unless static
+			# linking was verified below.
+			add_library(project_libcpp_static INTERFACE)
+
+			if(VKENGINE_STATIC_LIBCPP)
+				set(CMAKE_REQUIRED_FLAGS "-stdlib=libc++")
+				set(CMAKE_REQUIRED_LINK_OPTIONS
+					"-static-libstdc++" "-Wl,-Bstatic,-lc++abi,-Bdynamic")
+				check_cxx_source_compiles("
+					#include <string>
+					#include <stdexcept>
+					int main() {
+						try {
+							throw std::runtime_error(\"probe\");
+						} catch (const std::exception& e) {
+							return (int)std::string(e.what()).size();
+						}
+						return -1;
+					}
+				" HAS_STATIC_LIBCXX)
+				unset(CMAKE_REQUIRED_FLAGS)
+				unset(CMAKE_REQUIRED_LINK_OPTIONS)
+
+				if(HAS_STATIC_LIBCXX)
+					message(STATUS
+						"static libc++ working — statically linking libc++ and libc++abi in configs: ${_static_libcpp_configs}")
+					target_link_libraries(project_libcpp_static INTERFACE
+						"$<$<CONFIG:${_static_libcpp_configs_gx}>:-static-libstdc++>"
+						"$<$<CONFIG:${_static_libcpp_configs_gx}>:-Wl,-Bstatic,-lc++abi,-Bdynamic>")
+				else()
+					message(WARNING
+						"Static libc++ could not be linked — keeping the dynamic libc++ link "
+						"in all configurations. On Fedora install the static archives "
+						"(\"dnf install libcxx-static\"; libc++abi.a comes with libcxxabi-static) "
+						"and reconfigure.")
+				endif()
+			endif()
+			unset(_static_libcpp_configs)
+			unset(_static_libcpp_configs_gx)
 		else()
 			message(STATUS "libc++ NOT available — falling back to libstdc++")
 			# Undo the pre-project() changes so the default libstdc++ is used
