@@ -6,6 +6,7 @@ add_executable(gpu_tests
   normal_mapping_gpu_tests.cpp
   unlit_render_gpu_tests.cpp
   uv_variant_gpu_tests.cpp
+  mask_variant_gpu_tests.cpp
   bindless_slot_gpu_tests.cpp
   staging_pool_gpu_tests.cpp
   texture_uploader_gpu_tests.cpp
