@@ -30,6 +30,15 @@ export namespace VulkanEngine::SceneRenderer {
 
 // NOLINTBEGIN(modernize-avoid-c-arrays)
 // ── Scene uniform data (replaces push-constant lighting) ──
+//
+// Contract mirror for the shader-side Light (engine/core/shaders/
+// standard_mesh.slang). The light TYPE dispatch lives in position.w:
+//   0 = directional: L = -direction.xyz, no attenuation.
+//   1 = point:       L from position.xyz; inverse-square falloff windowed by
+//                    params.x range (<= 0 = infinite).
+//   2 = spot:        as point; direction.xyz is the cone axis pointing AWAY
+//                    from the light, params.y/z = cos(inner)/cos(outer).
+// color = rgb tint + w intensity. params is otherwise unused.
 struct alignas(16) Light {
     float position[4];
     float color[4];

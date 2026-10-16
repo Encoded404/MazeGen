@@ -17,7 +17,16 @@ struct SceneHeader {
 [[vk::binding(0, 4)]]
 StructuredBuffer<SceneHeader, CDataLayout> sceneHeader;
 
-// Light array (set 4, binding 1) — BlockArray-backed unbounded array
+// Light array (set 4, binding 1) — BlockArray-backed unbounded array.
+// Type dispatch lives in position.w (see the CPU mirror in SceneRenderer.cppm
+// for the authoritative contract comment):
+//   position: xyz = world position of a point/spot light; w = light type
+//             (0 = directional, 1 = point, 2 = spot).
+//   direction: xyz = -L for directional lights; the spot cone axis pointing
+//             AWAY from the light (unused otherwise).
+//   color:    rgb tint, w = intensity.
+//   params:   x = range (point/spot; <= 0 = infinite), y/z = cos(inner)/
+//             cos(outer) spot cone angles (unused otherwise).
 struct Light {
     float4 position;
     float4 color;
@@ -121,9 +130,12 @@ float4 Shade(PSInput input, float2 uv0, float2 uv1) {
     float2 uv_normal = SlotUV(mat.uv_sets, 1u, uv0, uv1);
     float2 uv_orm    = SlotUV(mat.uv_sets, 2u, uv0, uv1);
 
-    // Sample textures
-    float3 albedo = allTextures[NonUniformResourceIndex(mat.albedo_texture)]
-        .Sample(uv_albedo).rgb;
+    // Sample textures. Albedo alpha is carried through to the output (the
+    // alpha-blend render state relies on it); opaque textures are at 1.0 so
+    // the opaque path is unchanged.
+    float4 albedo_sample = allTextures[NonUniformResourceIndex(mat.albedo_texture)]
+        .Sample(uv_albedo);
+    float3 albedo = albedo_sample.rgb;
 
     // Effective ORM factor layer, packed unorm8 by the CPU gather pass: the
     // object's OrmOverride if present, else the material's own factors.
@@ -181,13 +193,54 @@ float4 Shade(PSInput input, float2 uv0, float2 uv1) {
     float3 combined_direct = float3(0.0, 0.0, 0.0);
     const uint lc = sceneHeader[0].light_count;
 
-    // Accumulate all lights
+    // Accumulate all lights. The type dispatch reads Light.position.w; the
+    // full params contract is documented on the CPU mirror (SceneRenderer.cppm
+    // Light struct):
+    //   type 0 (directional): L from -direction.xyz, no attenuation.
+    //   type 1 (point):       L from position.xyz; inverse-square falloff
+    //                         windowed by params.x range (<= 0 = infinite).
+    //   type 2 (spot):        as point; direction.xyz is the cone axis
+    //                         pointing AWAY from the light, params.y/z =
+    //                         cos(inner)/cos(outer). The cone edge fades
+    //                         linearly in cosine space between the angles
+    //                         (t * t; a deliberate simplification of glTF's
+    //                         smoothstep edge).
     for (uint li = 0; li < lc; li++) {
         uint lblock = li / 256u;
         uint lelem  = li % 256u;
         Light lt = sceneLights[NonUniformResourceIndex(lblock)][lelem];
 
-        float3 L = normalize(-lt.direction.xyz);
+        const uint light_type = uint(lt.position.w);
+        float atten = 1.0;
+        float3 L;
+        if (light_type == 0u) {
+            L = normalize(-lt.direction.xyz);
+        } else {
+            float3 to_light = lt.position.xyz - input.worldPos;
+            float d = length(to_light);
+            L = to_light / max(d, 1e-4);
+            atten = 1.0 / (d * d + 1e-6);
+            const float range = lt.params.x;
+            if (range > 0.0) {
+                const float r = d / range;
+                atten *= saturate(1.0 - r * r);
+            }
+            if (light_type == 2u) {
+                const float cos_axis = dot(normalize(-lt.direction.xyz), L);
+                const float cos_i = lt.params.y;
+                const float cos_o = lt.params.z;
+                const float t = saturate((cos_axis - cos_o) / max(cos_i - cos_o, 1e-4));
+                atten *= t * t;
+            }
+        }
+
+        // Fragments facing away from the light contribute nothing. Gate the
+        // whole term here instead of letting the 0.001 clamp leak diffuse
+        // light onto backfacing geometry.
+        if (dot(N, L) <= 0.0) {
+            continue;
+        }
+
         float3 H = normalize(V + L);
         float NdotV = max(dot(N, V), 0.001);
         float NdotL = max(dot(N, L), 0.001);
@@ -202,14 +255,27 @@ float4 Shade(PSInput input, float2 uv0, float2 uv1) {
         float3 diffuse = kD * albedo / PI;
 
         combined_direct += (diffuse + specular) * NdotL
-                          * lt.color.rgb * lt.color.w;
+                          * lt.color.rgb * lt.color.w * atten;
     }
 
-    // Ambient
-    float3 ambient = albedo * ao * sceneHeader[0].ambient_color.rgb * sceneHeader[0].ambient_color.a;
+    // Ambient. The occlusion factor applies to the ambient (indirect) term at
+    // the material's declared strength, never to direct light.
+    float ao_eff = lerp(1.0, ao, mat.occlusion_strength);
+    float3 ambient = albedo * ao_eff * sceneHeader[0].ambient_color.rgb * sceneHeader[0].ambient_color.a;
 
-    float3 color = ambient + combined_direct;
-    return float4(color, 1.0);
+    // Emissive: the factor colors the emissive texture per the glTF
+    // convention, and its .a carries the KHR_materials_emissive_strength
+    // intensity. Without an emissive texture the factor alone glows.
+    float2 uv_emissive = SlotUV(mat.uv_sets, 3u, uv0, uv1);
+    float3 emissive_rgb = mat.emissive_factor.rgb;
+    if (mat.emissive_texture != 0) {
+        emissive_rgb *= allTextures[NonUniformResourceIndex(mat.emissive_texture)]
+            .Sample(uv_emissive).rgb;
+    }
+    emissive_rgb *= mat.emissive_factor.a;
+
+    float3 color = ambient + combined_direct + emissive_rgb;
+    return float4(color, albedo_sample.a);
 }
 
 [shader("fragment")]
