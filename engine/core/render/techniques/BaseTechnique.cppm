@@ -158,6 +158,24 @@ struct PipelineFlags {
     bool bounds_conservative = true;
 };
 
+// ── AlphaMaskSupport — what a payload's interface-variant entry points deliver ──
+// Whether the entry-point pair a material's payload selects implements the
+// MASK discard contract. Not a bool because the unlit technique's single
+// shader discards unconditionally, which is legal under ANY blend mode:
+//   Never       — the entry points never discard. A Cutout (alpha_mask)
+//                 material here is a registration error: it would render
+//                 fully opaque and silently wrong.
+//   Always      — every entry point honors alpha_cutoff, blending independent.
+//   Conditional — discard is driven by payload content (the default mesh's
+//                 flags bit 2 picks the MASK pair; the render-state bit must
+//                 agree, or at minimum never claim a discard the shader
+//                 cannot perform).
+enum class AlphaMaskSupport {
+    Never,
+    Always,
+    Conditional,
+};
+
 // ── BaseTechnique — abstract base for all rendering techniques ──
 class BaseTechnique {
 public:
@@ -325,6 +343,17 @@ public:
         std::span<const std::byte> cpu_data) const {
         (void)cpu_data;
         return 0;
+    }
+
+    // What the payload's selected entry points deliver for the MASK contract —
+    // see AlphaMaskSupport above. The material manager cross-checks this
+    // against the material's blend mode at registration (a technique whose
+    // entry points never discard cannot be registered Cutout). Pure and
+    // device-free; the base technique never discards.
+    [[nodiscard]] virtual AlphaMaskSupport AlphaMaskExpectation(
+        std::span<const std::byte> cpu_data) const {
+        (void)cpu_data;
+        return AlphaMaskSupport::Never;
     }
 
     // Byte offsets of the 32-bit bindless texture-slot words inside this

@@ -6,11 +6,14 @@ import vulkan;
 
 import VulkanEngine.TechniqueManager.BaseTechnique;
 import VulkanEngine.TechniqueManager.DefaultMeshTechnique;
+import VulkanEngine.TechniqueManager.UnlitTextureTechnique;
 import VulkanEngine.ShaderManager;
 import VulkanEngine.TextureTypes;
 import VulkanEngine.GpuResources.MeshData;
 import VulkanEngine.FileLoaders.Mesh.GltfMaterialImport;
 import VulkanEngine.StandardMeshPipeline;
+import VulkanEngine.MaterialManager;
+import VulkanEngine.TechniqueManager;
 
 namespace {
 
@@ -116,6 +119,70 @@ TEST(UvVariantTest, ShortPayloadFallsBackToUv0) {
     DefaultMeshTechnique tech;
     const std::array<std::byte, 4> tiny{};
     EXPECT_EQ(tech.InterfaceVariantForMaterial(tiny), 0u);
+}
+
+// ── AlphaMaskSupport contract ──
+
+TEST(UvVariantTest, AlphaMaskExpectationFollowsThePayloadFlag) {
+    DefaultMeshTechnique tech;
+    DefaultMeshPerMaterialData plain{};
+    // Without the flag the material's pair never discards.
+    EXPECT_EQ(tech.AlphaMaskExpectation(AsBytes(plain)),
+              VulkanEngine::TechniqueManager::AlphaMaskSupport::Never);
+    plain.flags = VulkanEngine::TechniqueManager::kAlphaMaskFlag;
+    // With it, discard is payload-driven — the render-state bit must agree.
+    EXPECT_EQ(tech.AlphaMaskExpectation(AsBytes(plain)),
+              VulkanEngine::TechniqueManager::AlphaMaskSupport::Conditional);
+    // A short payload cannot carry the flag.
+    const std::array<std::byte, 4> tiny{};
+    const std::span<const std::byte> tiny_bytes(tiny);
+    EXPECT_EQ(tech.AlphaMaskExpectation(tiny_bytes),
+              VulkanEngine::TechniqueManager::AlphaMaskSupport::Never);
+}
+
+TEST(UvVariantTest, UnlitAlwaysHonorsAlphaCutoff) {
+    VulkanEngine::TechniqueManager::UnlitTextureTechnique unlit;
+    const std::array<std::byte, 24> payload{};
+    const std::span<const std::byte> payload_bytes(payload);
+    EXPECT_EQ(unlit.AlphaMaskExpectation(payload_bytes),
+              VulkanEngine::TechniqueManager::AlphaMaskSupport::Always);
+}
+
+// Registration cross-check: a Cutout material whose payload's entry points
+// never discard is rejected instead of silently rendering fully opaque; the
+// same payload with the mask flag registers, and an Opaque registration of a
+// mask payload is accepted (payload-driven discard renders correctly, just
+// ordered as opaque).
+TEST(UvVariantTest, CutoutWithoutADiscardCapablePayloadIsRejected) {
+    VulkanEngine::TechniqueManager::TechniqueManager tech_mgr{};
+    tech_mgr.Register(std::make_unique<DefaultMeshTechnique>());
+    VulkanEngine::MaterialManager::MaterialManager materials{};
+    materials.SetTechniqueManager(&tech_mgr);
+    materials.Initialize(nullptr);
+
+    DefaultMeshPerMaterialData plain{};
+    auto rejected = materials.Register<DefaultMeshTechnique>(
+        VulkanEngine::MaterialManager::MaterialDesc{
+            .blend = VulkanEngine::MaterialManager::BlendMode::Cutout},
+        plain);
+    EXPECT_FALSE(rejected.Valid());
+
+    DefaultMeshPerMaterialData masked{};
+    masked.flags = VulkanEngine::TechniqueManager::kAlphaMaskFlag;
+    auto valid = materials.Register<DefaultMeshTechnique>(
+        VulkanEngine::MaterialManager::MaterialDesc{
+            .blend = VulkanEngine::MaterialManager::BlendMode::Cutout},
+        masked);
+    EXPECT_TRUE(valid.Valid());
+
+    auto warning_only = materials.Register<DefaultMeshTechnique>(
+        VulkanEngine::MaterialManager::MaterialDesc{
+            .blend = VulkanEngine::MaterialManager::BlendMode::Opaque},
+        masked);
+    EXPECT_TRUE(warning_only.Valid());
+
+    materials.Shutdown();
+    tech_mgr.Shutdown();
 }
 
 TEST(UvVariantTest, BaseTechniqueHasNoInterfaceVariants) {

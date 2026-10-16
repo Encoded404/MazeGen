@@ -76,6 +76,14 @@ public:
                        scene_uniform_layout);
     }
 
+    // The single entry point discards below alpha_cutoff unconditionally
+    // (unlit.slang), so the MASK contract holds under any blend mode — an
+    // opaque unlit material simply never samples below the cutoff.
+    [[nodiscard]] AlphaMaskSupport AlphaMaskExpectation(
+        std::span<const std::byte> /*cpu_data*/) const override {
+        return AlphaMaskSupport::Always;
+    }
+
     // PackMaterialData uses the BaseTechnique default (TechniquePacking::Pack).
 
     [[nodiscard]] VulkanEngine::GpuResources::BlockArray* GetMaterialBlockArray() {

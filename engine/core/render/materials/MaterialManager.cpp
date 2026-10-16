@@ -177,7 +177,7 @@ void ValidateTextureBlendMode(const VulkanEngine::FileLoaders::Textures::AlphaAn
     } else if (mode == BlendMode::Cutout) {
         if (alpha.opaqueCoverage >= 1.0f) {
             LOGIFACE_LOG(warn, "Warning: texture '" + name + "' is fully opaque, "
-                         "Cutout blend mode has no effect (use Opaque)");
+                         "Cutout's discard can never trigger on it (use Opaque)");
         }
         if (alpha.hasFractionalAlpha) {
             LOGIFACE_LOG(warn, "Warning: texture '" + name + "' contains fractional alpha, "

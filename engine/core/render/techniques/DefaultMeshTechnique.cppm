@@ -173,6 +173,20 @@ public:
         return slot;
     }
 
+    [[nodiscard]] AlphaMaskSupport AlphaMaskExpectation(
+        std::span<const std::byte> cpu_data) const override {
+        if (cpu_data.size() < sizeof(DefaultMeshPerMaterialData)) {
+            return AlphaMaskSupport::Never;
+        }
+        DefaultMeshPerMaterialData data{};
+        std::memcpy(&data, cpu_data.data(), sizeof(data));
+        // Only the MASK entry-point pairs (flags bit 2) discard; the base
+        // pairs never do.
+        return (data.flags & kAlphaMaskFlag) != 0
+                   ? AlphaMaskSupport::Conditional
+                   : AlphaMaskSupport::Never;
+    }
+
     [[nodiscard]] VulkanEngine::GpuResources::BlockArray* GetMaterialBlockArray() {
         return GetBlockArrayForType<DefaultMeshPerMaterialData>();
     }

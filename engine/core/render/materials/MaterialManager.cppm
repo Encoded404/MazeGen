@@ -101,6 +101,34 @@ public:
 
         const std::uint32_t variant_slot =
             tech_ptr->InterfaceVariantForMaterial(entry->cpu_data);
+
+        // Cross-check the MASK contract: a technique whose selected entry
+        // points never discard cannot render a Cutout material correctly —
+        // alpha below the cutoff would be drawn opaque with no blending to
+        // catch it. Fail hard rather than normalizing: this is an authoring
+        // error that renders silently wrong, so Register logs an error and
+        // returns an invalid handle. The reverse direction (the payload
+        // wants a mask but the blend mode is not Cutout) is at most a
+        // warning: payload-driven discard renders correctly under an opaque
+        // pipeline, and the unlit technique discards under any blend mode.
+        const auto alpha_mask_support = tech_ptr->AlphaMaskExpectation(entry->cpu_data);
+        if (alpha_mask_support == VulkanEngine::TechniqueManager::AlphaMaskSupport::Never) {
+            if (render_state.alpha_mask) {
+                LOGIFACE_LOG(error, "MaterialManager::Register: Cutout material for technique " +
+                             std::to_string(tech_id.value) +
+                             " rejected: its payload's entry points never discard (the technique's "
+                             "interface variants carry no MASK pair for this payload)");
+                return MaterialHandle<Tech>{};
+            }
+        } else if (alpha_mask_support ==
+                       VulkanEngine::TechniqueManager::AlphaMaskSupport::Conditional &&
+                   desc.blend == BlendMode::Opaque && render_state.alpha_mask == false) {
+            LOGIFACE_LOG(warn, "MaterialManager::Register: material for technique " +
+                         std::to_string(tech_id.value) +
+                         " selects a MASK entry-point pair but registers as Opaque; the discard "
+                         "still renders, though pass ordering will treat it as fully opaque");
+        }
+
         // The intern stores the interface variant and the 16-bit render state
         // separately; the main pass reconstructs the composite draw key with
         // PackDrawKey(variant, render state).

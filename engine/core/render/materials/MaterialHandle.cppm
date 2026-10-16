@@ -56,8 +56,10 @@ struct MaterialRenderState {
 };
 
 // Derives the stored render state from an authoring descriptor. alpha_mask is
-// implied by Cutout, never independently settable, so the flag and the discard
-// path cannot disagree.
+// implied by Cutout, never independently settable. Whether the technique's
+// entry points can actually honor the discard is a separate, technique-side
+// contract — MaterialManager::Register cross-checks it via
+// BaseTechnique::AlphaMaskExpectation and rejects the combination.
 [[nodiscard]] constexpr MaterialRenderState DeriveRenderState(const MaterialDesc& desc) {
     return MaterialRenderState{
         .double_sided = desc.double_sided,
@@ -99,6 +101,10 @@ struct MaterialEntry {
 template<typename Tech>
 class MaterialHandle {
 public:
+    // Invalid handle: all-null/zero; Valid() is false. Register returns one
+    // when a registration is rejected (e.g. a Cutout material whose technique
+    // cannot honor alpha_mask).
+    MaterialHandle() = default;
     // ── Read access: const ref, never dirties, constexpr offset ──
     template<typename T>
     const T& Read() const {
