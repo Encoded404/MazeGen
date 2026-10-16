@@ -23,6 +23,9 @@ target_link_options(crash_probe PRIVATE
 if(TARGET project_libcpp_static)
   target_link_libraries(crash_probe PRIVATE project_libcpp_static)
 endif()
+if(TARGET project_libcpp_sanitized)
+  add_dependencies(crash_probe project_libcpp_sanitized)
+endif()
 
 add_executable(crash_tests
   crash_handler_tests.cpp

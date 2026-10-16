@@ -27,6 +27,14 @@ ctest --preset debug
   must link last; the static link requires the `libcxx-static` archive
   (`libc++.a`), else configure warns and falls back to the dynamic link.
   Build-time host tools (slang-spirv-compiler) stay fully dynamic.
+- `libcpp-sanitize` (top-level CMakeLists, after the lld probe): distro
+  static libc++ archives ship with broken addrsig tables (RPM packaging
+  zeroes sh_link), which makes lld warn once per member under `--icf=safe`.
+  The build auto-traces which archives the linker resolves, generates
+  sanitized copies into `<build>/libcpp-sanitized/` with a Ninja custom
+  command (auto-regenerates when the source archive changes), and remaps
+  the link to them via `-Wl,--remap-inputs`. Folding results are identical;
+  the binaries just link quietly. Binaries stay byte-identical in size.
 - Never add per-command `cd`; pass the working directory to the tool instead.
 
 ## Test conventions

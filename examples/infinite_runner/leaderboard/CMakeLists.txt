@@ -129,3 +129,7 @@ endif()
 if(TARGET project_libcpp_static)
     target_link_libraries(leaderboard_server PRIVATE project_libcpp_static)
 endif()
+# Build-order: sanitized libc++ archives exist before the link consumes them.
+if(TARGET project_libcpp_sanitized)
+    add_dependencies(leaderboard_server project_libcpp_sanitized)
+endif()

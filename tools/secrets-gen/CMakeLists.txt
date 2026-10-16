@@ -40,3 +40,7 @@ endif()
 if(TARGET project_libcpp_static)
     target_link_libraries(secrets-gen PRIVATE project_libcpp_static)
 endif()
+# Build-order: sanitized libc++ archives exist before the link consumes them.
+if(TARGET project_libcpp_sanitized)
+    add_dependencies(secrets-gen project_libcpp_sanitized)
+endif()

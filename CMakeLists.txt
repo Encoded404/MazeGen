@@ -319,8 +319,9 @@ if(USE_LIBCPP)
 						"and reconfigure.")
 				endif()
 			endif()
-			unset(_static_libcpp_configs)
-			unset(_static_libcpp_configs_gx)
+			# _static_libcpp_configs and _static_libcpp_configs_gx are kept:
+			# the libcpp-sanitize block further down (after the lld probe)
+			# derives its own remap genex from them.
 		else()
 			message(STATUS "libc++ NOT available — falling back to libstdc++")
 			# Undo the pre-project() changes so the default libstdc++ is used
@@ -447,6 +448,167 @@ if(VKENGINE_HAVE_LLD)
     add_link_options(-fuse-ld=lld)
 else()
     message(STATUS "lld not found — using the default linker")
+endif()
+
+# ── Sanitized static libc++ archives (silences ICF noise, nothing else) ─
+#
+# Context: the slang-free configurations statically embed libc++ and
+# libc++abi (see project_libcpp_static above). The distro-shipped archives
+# (on Fedora: libcxx/libcxxabi RPMs) are stripped by the packager, and the
+# stripping tool zeroes the `sh_link` field of every `.llvm_addrsig`
+# (address-significance table) section. lld's `--icf=safe` then prints
+#
+#   ld.lld: warning: .../libc++.a(member.cpp.o): --icf=safe conservatively
+#      ignores SHT_LLVM_ADDRSIG [index N] with sh_link=0 ...
+#
+# once per affected member per linked executable. Behaviour is unchanged and
+# correct — lld treats a broken table as if none existed — so the fix is to
+# remove exactly those broken tables from the archive members.
+#
+# Mechanism, designed to be foolproof:
+#
+#   1. Discovery: a probe link with `-Wl,-t` (same driver, same
+#      -static-libstdc++ / -lc++abi flags the real executables use) reports
+#      the exact archive paths lld resolves under *this* toolchain. Custom
+#      `--gcc-install-dir`/`-L` setups are therefore handled by
+#      construction: we ask the linker what it would use instead of
+#      guessing at directories.
+#   2. Generation: for every discovered archive `path/name.a`, a Ninja
+#      custom command writes `<build>/libcpp-sanitized/name.a` by removing
+#      the broken addrsig tables member-by-member (cmake/
+#      SanitizeStaticCppArchive.cmake; healthy members are copied through
+#      byte-for-byte, so nothing else about the archive changes). The
+#      command's DEPENDS list contains the source archive, so Ninja
+#      re-sanitizes automatically whenever the RPM was updated (mtime
+#      changed) — the copies can never go stale. The result is re-verified
+#      inside the script; a failed verification fails the build with a
+#      loud message instead of silently continuing.
+#   3. Substitution: the real link keeps every flag it has today
+#      (`-static-libstdc++`, `-Wl,-Bstatic,-lc++abi,-Bdynamic`) and gains
+#      only `-Wl,--remap-inputs=<resolved-path>=<sanitized-copy>` — lld
+#      reads the sanitized copy in place of the distro archive. With the
+#      broken sections gone, lld is quiet and folds nothing extra: absent
+#      table and sh_link==0 are the same "conservative" case, so the
+#      resulting binaries are bit-identical to yesterday's.
+#
+# Skipped silently-with-status when: no lld (remap is lld-only), Windows
+# (lld-link target has no such warning), sanitization already applied or
+# the probe cannot run — everything then works exactly as before the
+# sanitization existed, just with the warning noise.
+set(VKENGINE_LIBCPP_SANITIZED_DIR "${CMAKE_BINARY_DIR}/libcpp-sanitized")
+if(VKENGINE_HAVE_LLD
+        AND NOT WIN32
+        AND HAS_STATIC_LIBCXX
+        AND VKENGINE_STATIC_LIBCPP)
+    # Toolchain bits for the member surgery.
+    find_program(VKENGINE_READELF_TOOL
+        NAMES llvm-readelf-${CMAKE_CXX_COMPILER_VERSION} llvm-readelf readelf)
+    if(NOT VKENGINE_READELF_TOOL OR NOT CMAKE_OBJCOPY OR NOT CMAKE_AR)
+        message(STATUS
+            "libcpp-sanitize: readelf/objcopy/ar not available — keeping the "
+            "dynamic ICF warnings (linking is unaffected)")
+    else()
+        file(MAKE_DIRECTORY "${VKENGINE_LIBCPP_SANITIZED_DIR}")
+
+        # 1) Trace-probe: which libc++/libc++abi archives does lld resolve?
+        set(_san_probe_src "${VKENGINE_LIBCPP_SANITIZED_DIR}/icf_trace_probe.cpp")
+        file(WRITE "${_san_probe_src}" "
+#include <string>
+#include <stdexcept>
+int main() {
+    try { throw std::runtime_error(\"probe\"); }
+    catch (const std::exception& e) { return (int)std::string(e.what()).size(); }
+    return -1;
+}
+")
+        set(_san_probe_obj "${VKENGINE_LIBCPP_SANITIZED_DIR}/icf_trace_probe.o")
+        execute_process(
+            COMMAND "${CMAKE_CXX_COMPILER}"
+                -c "${_san_probe_src}" -o "${_san_probe_obj}" -stdlib=libc++
+            RESULT_VARIABLE _san_compile_result)
+        set(_san_probe_out "${VKENGINE_LIBCPP_SANITIZED_DIR}/icf_trace_probe.bin")
+        # CMAKE_EXE_LINKER_FLAGS may carry -L/-B switches from whoever
+        # configured the build; spread it so they influence the archive
+        # resolution exactly as they would in a real link.
+        separate_arguments(_san_user_ldflags NATIVE_COMMAND "${CMAKE_EXE_LINKER_FLAGS}")
+        execute_process(
+            COMMAND "${CMAKE_CXX_COMPILER}" "${_san_probe_obj}"
+                -o "${_san_probe_out}" -stdlib=libc++ -static-libstdc++
+                -fuse-ld=lld -Wl,-t -Wl,-Bstatic,-lc++abi,-Bdynamic
+                ${_san_user_ldflags}
+            OUTPUT_VARIABLE _san_trace
+            ERROR_QUIET
+            RESULT_VARIABLE _san_link_result)
+        file(REMOVE "${_san_probe_out}")
+
+        set(_san_keys "")
+        if(_san_compile_result EQUAL 0 AND _san_link_result EQUAL 0)
+            # Distinct archive paths from trace lines of the form
+            #   <dir>/libc++.a(<member>.o)
+            string(REPLACE "\n" ";" _san_trace_lines "${_san_trace}")
+            foreach(_san_line IN LISTS _san_trace_lines)
+                if(_san_line MATCHES "^([^ ]*libc\\+\\+(abi)?\\.a)\\([^)]*\\)")
+                    list(APPEND _san_keys "${CMAKE_MATCH_1}")
+                endif()
+            endforeach()
+            if(_san_keys)
+                list(REMOVE_DUPLICATES _san_keys)
+            endif()
+        else()
+            message(STATUS
+                "libcpp-sanitize: probe link failed — keeping the ICF warnings")
+        endif()
+
+        # 2) Per discovered archive: sanitized copy + remap flag.
+        set(_san_outputs "")
+        set(_san_remapped "")
+        set(_san_basenames "")
+        foreach(_san_key IN LISTS _san_keys)
+            get_filename_component(_san_name "${_san_key}" NAME)
+            if(_san_name IN_LIST _san_basenames)
+                # The same archive name resolved from two different dirs in
+                # one link cannot happen for a single -lc++/lc++abi; if it
+                # ever does, skip remapping that one rather than guess.
+                continue()
+            endif()
+            list(APPEND _san_basenames "${_san_name}")
+            set(_san_out "${VKENGINE_LIBCPP_SANITIZED_DIR}/${_san_name}")
+            add_custom_command(
+                OUTPUT "${_san_out}"
+                COMMAND "${CMAKE_COMMAND}"
+                    -DSAN_IN=${_san_key}
+                    -DSAN_OUT=${_san_out}
+                    -DSAN_AR=${CMAKE_AR}
+                    -DSAN_OBJCOPY=${CMAKE_OBJCOPY}
+                    -DSAN_READELF=${VKENGINE_READELF_TOOL}
+                    -P "${CMAKE_SOURCE_DIR}/cmake/SanitizeStaticCppArchive.cmake"
+                DEPENDS "${_san_key}"
+                    "${CMAKE_SOURCE_DIR}/cmake/SanitizeStaticCppArchive.cmake"
+                COMMENT "Sanitizing ${_san_name} (removing broken addrsig tables)"
+                VERBATIM)
+            list(APPEND _san_outputs "${_san_out}")
+            list(APPEND _san_remapped "${_san_key}")
+            target_link_libraries(project_libcpp_static INTERFACE
+                "$<$<CONFIG:${_static_libcpp_configs_gx}>:-Wl,--remap-inputs=${_san_key}=${_san_out}>")
+        endforeach()
+
+        if(_san_outputs)
+            add_custom_target(project_libcpp_sanitized
+                DEPENDS ${_san_outputs})
+            list(JOIN _san_remapped "', '" _san_remapped_msg)
+            message(STATUS
+                "libcpp-sanitize: remapping '{${_san_remapped_msg}}' to "
+                "sanitized copies in ${VKENGINE_LIBCPP_SANITIZED_DIR}")
+        elseif(_san_link_result EQUAL 0 AND _san_compile_result EQUAL 0)
+            message(STATUS
+                "libcpp-sanitize: trace found no static libc++ archives "
+                "(nothing to sanitize)")
+        endif()
+        # Executables that link project_libcpp_static must also depend on the
+        # sanitizer outputs; the helper functions that create executables
+        # (add_engine_example, setup_test_target, and the standalone targets)
+        # do this next to their link hook.
+    endif()
 endif()
 
 # Sections optimization for dead-code stripping (gc-sections)

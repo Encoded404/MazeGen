@@ -60,6 +60,11 @@ function(setup_test_target TARGET)
   if(TARGET project_libcpp_static)
     target_link_libraries(${TARGET} PRIVATE project_libcpp_static)
   endif()
+  # Build-order: sanitized libc++ archives exist before the link consumes
+  # them (see libcpp-sanitize in the top-level CMakeLists).
+  if(TARGET project_libcpp_sanitized)
+    add_dependencies(${TARGET} project_libcpp_sanitized)
+  endif()
   if(ARG_LABELS)
     set(TEST_LABELS "${ARG_LABELS}")
   else()

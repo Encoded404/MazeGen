@@ -240,6 +240,11 @@ function(add_engine_example NAME)
     if(TARGET project_libcpp_static)
         target_link_libraries(${NAME} PRIVATE project_libcpp_static)
     endif()
+    # Build-order: the sanitized libc++ archives must exist before any link
+    # that consumes them (see libcpp-sanitize in the top-level CMakeLists).
+    if(TARGET project_libcpp_sanitized)
+        add_dependencies(${NAME} project_libcpp_sanitized)
+    endif()
 
     # Release deliverables ship without a symbol table: .symtab/.strtab alone
     # is ~1.5 MB on an example binary and carries nothing the program needs at
