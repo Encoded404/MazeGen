@@ -1,6 +1,8 @@
 module;
 
+#include <cassert>
 #include <cstddef>
+#include <cstring>
 
 export module VulkanEngine.TechniqueManager.DefaultMeshTechnique;
 
@@ -141,21 +143,34 @@ public:
 
     // PackMaterialData uses the BaseTechnique default (TechniquePacking::Pack).
 
-    // The material samples an out-of-line UV set when any texture slot selects
-    // one. uv_sets packs 2 bits per slot; the highest selected set is the
-    // interface variant slot (0 = UV0 only, 1 = UV1). This is what keeps the
-    // material's pipeline consistent with the UV sets its textures read.
+    // Interface-variant slot = uv bit + mask bit, the material's required
+    // entry-point pair (slots 0-3 row-indexed in GameEngine):
+    //   uv bit: the material samples an out-of-line UV set when any texture
+    //     slot's uv_sets selector is exactly 1 (mirroring SlotUV's `== 1`
+    //     semantics — selectors above 1 read inline UV0 today, so they must
+    //     not select the UV1 pipeline).
+    //   mask bit: flags bit 2 (kAlphaMaskFlag); a set flag selects the
+    //     alpha-masked entry-point pair whose fragment discards at the
+    //     material's alpha_cutoff.
+    // This is what keeps the material's pipeline consistent with the UV sets
+    // its textures read and with the MASK render contract.
     [[nodiscard]] std::uint32_t InterfaceVariantForMaterial(
         std::span<const std::byte> cpu_data) const override {
         if (cpu_data.size() < sizeof(DefaultMeshPerMaterialData)) return 0;
         DefaultMeshPerMaterialData data{};
         std::memcpy(&data, cpu_data.data(), sizeof(data));
-        std::uint32_t highest = 0;
+        std::uint32_t uv = 0;
         for (std::uint32_t slot = 0; slot < 4; ++slot) {
             const std::uint32_t set = (data.uv_sets >> (slot * 2u)) & 0x3u;
-            highest = std::max(highest, set);
+            if (set == 1u) {
+                uv = 1u;
+                break;
+            }
         }
-        return highest;
+        const std::uint32_t slot =
+            uv | ((data.flags & kAlphaMaskFlag) != 0 ? 2u : 0u);
+        assert(slot < 4u && "interface variants are sized for uv bit + mask bit");
+        return slot;
     }
 
     [[nodiscard]] VulkanEngine::GpuResources::BlockArray* GetMaterialBlockArray() {

@@ -185,9 +185,11 @@ TEST_F(GltfMaterialImportTest, UvSetsFollowTheSlotTexCoords) {
     const GltfImportResult result = ImportGltfMaterials(path_);
 
     // The texCoord the author declares per slot must resolve the technique's
-    // interface variant end to end: the fixture's highest referenced set
-    // (baseColor/emissive at TEXCOORD_1, everything else at TEXCOORD_0)
-    // selects the UV1 variant, not the base pipeline.
+    // interface variant end to end: the fixture's lit material references
+    // baseColor/emissive at TEXCOORD_1 (everything else at TEXCOORD_0) and is
+    // authored alphaMode MASK, so it selects the mask+uv1 pair (slot 3) — the
+    // pipeline whose fragment honors alphaCutoff, not the discard-free uv1
+    // shader the pre-mask mapping silently picked.
     const auto variant = [](const GltfMaterialInfo& material) {
         const auto data = VulkanEngine::TechniqueManager::FromGltfMaterial(material);
         VulkanEngine::TechniqueManager::DefaultMeshTechnique tech;
@@ -195,22 +197,24 @@ TEST_F(GltfMaterialImportTest, UvSetsFollowTheSlotTexCoords) {
             std::span<const std::byte>(reinterpret_cast<const std::byte*>(&data),
                                        sizeof(data)));
     };
-    EXPECT_EQ(variant(result.materials[0]), 1u);
+    EXPECT_EQ(variant(result.materials[0]), 3u);
 
-    // Authoring TEXCOORD_1 on the normal slot alone must still select UV1.
+    // Authoring TEXCOORD_1 on the normal slot alone (opaque material) must
+    // still select UV1.
     GltfMaterialInfo normal_only{};
     normal_only.normal_texture.present = true;
     normal_only.normal_texture.tex_coord = 1u;
     EXPECT_EQ(variant(normal_only), 1u);
 
-    // The highest referenced set wins: an occlusion-only ORM slot at
-    // TEXCOORD_2 (no shared metallicRoughness texture) outranks the
-    // TEXCOORD_0 baseColor.
+    // Selectors above 1 do not select UV1: SlotUV reads any selector != 1 as
+    // inline UV0, so an occlusion-only ORM slot at TEXCOORD_2 (no shared
+    // metallicRoughness texture) stays on the base pipeline until an
+    // out-of-line third UV set exists.
     GltfMaterialInfo occlusion_high{};
     occlusion_high.base_color_texture.present = true;
     occlusion_high.occlusion_texture.present = true;
     occlusion_high.occlusion_texture.tex_coord = 2u;
-    EXPECT_EQ(variant(occlusion_high), 2u);
+    EXPECT_EQ(variant(occlusion_high), 0u);
 }
 
 TEST_F(GltfMaterialImportTest, SamplerMapsToDeviceDescription) {
@@ -299,13 +303,14 @@ TEST_F(GltfMaterialImportTest, ParsedMaterialResolvesToADrawGroup) {
     auto handle = materials.Register<VulkanEngine::TechniqueManager::DefaultMeshTechnique>(desc, data);
     ASSERT_TRUE(handle.Valid());
 
-    // The material's highest selected UV set is 1 (baseColor/emissive), so it
-    // must resolve to the UV1 interface variant, not the base pipeline.
+    // The material's selected UV set is 1 (baseColor/emissive) and it is
+    // authored alphaMode MASK, so it must resolve to the mask+uv1 interface
+    // variant (slot 3) and intern a correspondingly non-base draw group.
     const auto* entry = tech_mgr.GetTechnique(tech_mgr.GetId<VulkanEngine::TechniqueManager::DefaultMeshTechnique>());
     ASSERT_NE(entry, nullptr);
     EXPECT_EQ(entry->InterfaceVariantForMaterial(
                   std::span<const std::byte>(reinterpret_cast<const std::byte*>(&data), sizeof(data))),
-              1u);
+              3u);
 
     // A MASK double-sided material interns a non-zero draw group.
     const VulkanEngine::MaterialManager::MaterialId id{handle.Id()};

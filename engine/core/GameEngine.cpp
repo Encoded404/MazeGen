@@ -416,12 +416,17 @@ bool GameEngine::InitRenderer(VulkanEngine::Application::ApplicationContext& ctx
     {
         auto s = DebugSection("engineinit.technique_manager");
         auto mesh_tech = std::make_unique<TechniqueManager::DefaultMeshTechnique>();
-        // Interface-variant rows: slot 0 is the base pipeline; slot 1 is the
-        // out-of-line UV1 entry-point pair. Both stages must be named main_uv1
-        // to link on the shared descriptor layout.
-        const std::array<TechniqueManager::VariantShaderPair, 2> rows = {{
+        // Interface-variant rows: slot = uv bit (0 = inline UV0, 1 =
+        // out-of-line UV1) + mask bit (1 = the alpha-masked entry-point pair).
+        //   0 main  1 main_uv1  2 main_mask  3 main_mask_uv1
+        // Both stages of the uv1 pair must be named main_uv1 to link on the
+        // shared descriptor layout; the mask pairs reuse the same vertex
+        // shaders, since the mask is a fragment-only concern.
+        const std::array<TechniqueManager::VariantShaderPair, 4> rows = {{
             {vert_id, frag_id},
             {ctx_.shader_ids.main_indir_vert_uv1, ctx_.shader_ids.standard_mesh_frag_uv1},
+            {vert_id, ctx_.shader_ids.standard_mesh_frag_mask},
+            {ctx_.shader_ids.main_indir_vert_uv1, ctx_.shader_ids.standard_mesh_frag_mask_uv1},
         }};
         mesh_tech->SetVariantShaderRows(rows);
         if (!mesh_tech->CompileDefaultMesh(

@@ -34,10 +34,10 @@ struct DrawKeyPipelineState {
 [[nodiscard]] DrawKeyPipelineState DeriveDrawKeyPipelineState(
     std::uint32_t render_state_key, vk::CullModeFlags base_cull_mode);
 
-// A technique that owns named entry-point rows (the UV variants) maps a dense
-// interface-variant slot to its (vert, frag) shader rows. Pure, so the slot
-// mapping is unit-testable without a device. `rows` holds the slot 0 pair
-// followed by one pair per out-of-line UV set.
+// A technique that owns named entry-point rows maps a dense interface-variant
+// slot to its (vert, frag) shader rows. Pure, so the slot mapping is
+// unit-testable without a device. The slot layout is each technique's
+// contract; the default mesh technique uses uv bit + alpha-mask bit (4 rows).
 struct VariantShaderPair {
     ShaderSystem::ShaderId vert{};
     ShaderSystem::ShaderId frag{};

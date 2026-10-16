@@ -19,6 +19,8 @@ import Shaders.Engine.MainIndirVertUV1;
 import Shaders.Engine.DepthIndirVert;
 import Shaders.Engine.StandardMeshFrag;
 import Shaders.Engine.StandardMeshFragUV1;
+import Shaders.Engine.StandardMeshFragMask;
+import Shaders.Engine.StandardMeshFragMaskUV1;
 import Shaders.Engine.DepthPrepassFrag;
 import Shaders.Engine.UnlitFrag;
 import Shaders.Engine.UiTextVert;
@@ -50,6 +52,11 @@ struct EngineShaderIds {
     ShaderSystem::ShaderId depth_indir_vert;
     ShaderSystem::ShaderId standard_mesh_frag;
     ShaderSystem::ShaderId standard_mesh_frag_uv1;
+    // MASK interface-variant rows (named entry points main_mask /
+    // main_mask_uv1). Paired with the existing vertex shaders by the default
+    // mesh technique's variant table.
+    ShaderSystem::ShaderId standard_mesh_frag_mask;
+    ShaderSystem::ShaderId standard_mesh_frag_mask_uv1;
     ShaderSystem::ShaderId depth_prepass_frag;
     ShaderSystem::ShaderId unlit_frag;
     // Screen-space text overlay: the vertex pulls the quad from SV_VertexID and
@@ -85,6 +92,9 @@ struct EngineShaderIds {
         depth_indir_vert         = Shaders::Engine::DepthIndirVert::Register(mgr, data_dir);
         standard_mesh_frag       = Shaders::Engine::StandardMeshFrag::Register(mgr, data_dir);
         standard_mesh_frag_uv1   = Shaders::Engine::StandardMeshFragUV1::Register(mgr, data_dir);
+        standard_mesh_frag_mask  = Shaders::Engine::StandardMeshFragMask::Register(mgr, data_dir);
+        standard_mesh_frag_mask_uv1 =
+            Shaders::Engine::StandardMeshFragMaskUV1::Register(mgr, data_dir);
         depth_prepass_frag       = Shaders::Engine::DepthPrepassFrag::Register(mgr, data_dir);
         unlit_frag               = Shaders::Engine::UnlitFrag::Register(mgr, data_dir);
         ui_text_vert             = Shaders::Engine::UiTextVert::Register(mgr, data_dir);

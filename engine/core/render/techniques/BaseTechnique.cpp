@@ -466,6 +466,11 @@ ShaderSystem::GraphicsPipelineDesc BaseTechnique::MakeVariantDesc(
     const std::uint32_t variant_slot = DrawKeyState::VariantOf(draw_key);
     const DrawKeyPipelineState state = DeriveDrawKeyPipelineState(
         render_state_key, config.cull_mode);
+    // Note: DrawKeyState::AlphaMask(render_state_key) is deliberately NOT
+    // consumed here. The MASK contract is a shader entry-point property — the
+    // material's interface-variant slot selects the discard-carrying fragment
+    // — not a fixed-function one, and it must never grow into an alpha-blend
+    // state change. The render-state bit mirrors that expectation.
 
     // Interface variant: rebind the shader rows. Each row is a distinct module
     // whose SPIR-V entry point is "main" (Slang emits "main" regardless of the

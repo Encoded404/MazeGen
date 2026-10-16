@@ -73,9 +73,43 @@ TEST(UvVariantTest, HighestSelectedSetWins) {
     DefaultMeshPerMaterialData mat = MaterialSelectingUvSets({1u, 1u, 0u, 0u});
     // albedo -> set 1, normal -> set 1.
     EXPECT_EQ(tech.InterfaceVariantForMaterial(AsBytes(mat)), 1u);
-    // A slot selecting set 2 outranks the ones on set 1.
+}
+
+// Selectors above 1 do NOT select the UV1 pipeline: SlotUV reads any selector
+// != 1 as inline UV0, so the variant quantizes to match (TEXCOORD_2+ set
+// selectors degrade to UV0 sampling until an out-of-line third UV set exists;
+// the old highest-wins mapping only ever "worked" by falling back through the
+// row-count check to the base UV0 pipeline anyway).
+TEST(UvVariantTest, SetSelectorsAboveOneDegradeToUv0) {
+    DefaultMeshTechnique tech;
+    // A slot selecting set 2 does not select UV1.
     DefaultMeshPerMaterialData emissive_high = MaterialSelectingUvSets({1u, 0u, 0u, 2u});
-    EXPECT_EQ(tech.InterfaceVariantForMaterial(AsBytes(emissive_high)), 2u);
+    EXPECT_EQ(tech.InterfaceVariantForMaterial(AsBytes(emissive_high)), 1u);
+    DefaultMeshPerMaterialData only_high = MaterialSelectingUvSets({0u, 0u, 0u, 2u});
+    EXPECT_EQ(tech.InterfaceVariantForMaterial(AsBytes(only_high)), 0u);
+}
+
+// The mask bit composes with the uv bit: flags bit 2 selects the MASK
+// entry-point pairs (slots 2/3), independently of the UV sets the payload
+// selects.
+TEST(UvVariantTest, MaskFlagSelectsTheMaskPairs) {
+    DefaultMeshTechnique tech;
+    DefaultMeshPerMaterialData base_mask = MaterialSelectingUvSets({0u, 0u, 0u, 0u});
+    base_mask.flags = VulkanEngine::TechniqueManager::kAlphaMaskFlag;
+    EXPECT_EQ(tech.InterfaceVariantForMaterial(AsBytes(base_mask)), 2u);
+
+    DefaultMeshPerMaterialData uv1_mask = MaterialSelectingUvSets({0u, 1u, 0u, 0u});
+    uv1_mask.flags = VulkanEngine::TechniqueManager::kAlphaMaskFlag;
+    EXPECT_EQ(tech.InterfaceVariantForMaterial(AsBytes(uv1_mask)), 3u);
+}
+
+// A texCoord of 1 in any slot selects the out-of-line UV1 sets; the old
+// highest-wins semantics did the same numerically, but a later mask bit needs
+// a guaranteed {0,1} uv field to compose with.
+TEST(UvVariantTest, UvQuantizationMirrorsSlotUv) {
+    DefaultMeshTechnique tech;
+    EXPECT_EQ(tech.InterfaceVariantForMaterial(
+                  AsBytes(MaterialSelectingUvSets({2u, 3u, 1u, 2u}))), 1u);
 }
 
 TEST(UvVariantTest, ShortPayloadFallsBackToUv0) {

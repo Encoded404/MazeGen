@@ -357,6 +357,8 @@ set(_engine_shaders
     DepthIndirVert          depth_indir.slang          vertex   main
     StandardMeshFrag        standard_mesh.slang        fragment main
     StandardMeshFragUV1     standard_mesh.slang        fragment main_uv1
+    StandardMeshFragMask    standard_mesh.slang        fragment main_mask
+    StandardMeshFragMaskUV1 standard_mesh.slang        fragment main_mask_uv1
     DepthPrepassFrag        depth_prepass.slang        fragment main
     UnlitFrag               unlit.slang                fragment main
     UiTextVert              ui_text.slang              vertex   vs_main

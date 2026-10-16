@@ -78,7 +78,8 @@ public:
     // state. Keys are dense-interned over the triple so the low TECHNIQUE_BITS
     // of a packed technique_material bound *live groups*, not the key's
     // cardinality. The base group (variant 0, no render state) is seeded at
-    // registration; variant and render-state groups are added in later work.
+    // registration; interface-variant and render-state groups are interned on
+    // demand as materials register.
     // Returns UINT16_MAX when the cap is reached.
     [[nodiscard]] std::uint16_t InternDrawGroup(std::uint16_t technique_id,
                                                 std::uint16_t variant_slot,
