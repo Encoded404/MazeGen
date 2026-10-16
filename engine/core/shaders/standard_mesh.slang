@@ -44,7 +44,7 @@ struct MaterialData {
     uint normal_texture;
     uint orm_texture;
     uint emissive_texture;
-    uint flags;          // bits0..1 normal encoding; bit2 alpha_mask; bit3 has_transform
+    uint flags;          // bits0..1 normal encoding; bit2 alpha_mask (selects the MASK entry points); bit3 has_transform
     uint uv_sets;
     float roughness_factor;
     float metallic_factor;
@@ -120,7 +120,16 @@ float3 F_Schlick(float3 F0, float cosTheta) {
 
 // Shared shading body. `uv0`/`uv1` are the two UV sets; each texture slot
 // selects between them through MaterialData.uv_sets.
-float4 Shade(PSInput input, float2 uv0, float2 uv1) {
+//
+// Returns the shaded color (with the sampled albedo alpha in .a) plus the
+// alpha_cutoff the MASK entry points need, so a mask caller never has to
+// re-fetch the material or re-sample the albedo map.
+struct ShadeOut {
+    float4 color;        // rgb shaded; a = sampled albedo alpha
+    float alpha_cutoff;  // MaterialData.alpha_cutoff
+};
+
+ShadeOut Shade(PSInput input, float2 uv0, float2 uv1) {
     uint block = input.materialId / 256u;
     uint elem  = input.materialId % 256u;
     MaterialData mat = materialBuffer[NonUniformResourceIndex(block)][elem];
@@ -275,12 +284,15 @@ float4 Shade(PSInput input, float2 uv0, float2 uv1) {
     emissive_rgb *= mat.emissive_factor.a;
 
     float3 color = ambient + combined_direct + emissive_rgb;
-    return float4(color, albedo_sample.a);
+    ShadeOut out_result;
+    out_result.color = float4(color, albedo_sample.a);
+    out_result.alpha_cutoff = mat.alpha_cutoff;
+    return out_result;
 }
 
 [shader("fragment")]
 float4 main(PSInput input) : SV_TARGET {
-    return Shade(input, input.texCoord, input.texCoord);
+    return Shade(input, input.texCoord, input.texCoord).color;
 }
 
 // UV1 variant: samples the per-slot selected set (UV0 or UV1) through the
@@ -295,5 +307,39 @@ float4 main_uv1(PSInputUV1 input) : SV_TARGET {
     base.ormPacked = input.ormPacked;
     base.tangent = input.tangent;
     base.handedness = input.handedness;
-    return Shade(base, input.texCoord, input.uv1);
+    return Shade(base, input.texCoord, input.uv1).color;
+}
+
+// MASK variant: the alpha-masked contract of main. Discards at the material's
+// declared cutoff and otherwise outputs opaquely — the pipeline carries no
+// blending, so the output alpha is always 1.0 (alpha-to-coverage will be its
+// OWN interface-variant bit, not a change to these entry points).
+//
+// The variant exists so the discard lives in entry points that only MASK
+// materials bind: the base pipeline (and the depth prepass that shares its
+// vertex stage) stays discard-free and keeps full early-Z optimization.
+[shader("fragment")]
+float4 main_mask(PSInput input) : SV_TARGET {
+    ShadeOut result = Shade(input, input.texCoord, input.texCoord);
+    if (result.color.a < result.alpha_cutoff) {
+        discard;
+    }
+    return float4(result.color.rgb, 1.0);
+}
+
+[shader("fragment")]
+float4 main_mask_uv1(PSInputUV1 input) : SV_TARGET {
+    PSInput base;
+    base.normal = input.normal;
+    base.texCoord = input.texCoord;
+    base.materialId = input.materialId;
+    base.worldPos = input.worldPos;
+    base.ormPacked = input.ormPacked;
+    base.tangent = input.tangent;
+    base.handedness = input.handedness;
+    ShadeOut result = Shade(base, input.texCoord, input.uv1);
+    if (result.color.a < result.alpha_cutoff) {
+        discard;
+    }
+    return float4(result.color.rgb, 1.0);
 }
