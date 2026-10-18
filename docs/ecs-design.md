@@ -109,10 +109,20 @@ spawn while iterating collect what they need, then spawn after the loop.
 ## Engine-owned resources
 
 Data components hold handles, not owners. `DynamicMesh` stores a
-`MeshManager::Handle`, and `GameEngine::Setup` registers
+`MeshManager::Handle`, and the engine's resource-hooks module registers
 `OnRemove<DynamicMesh>` to call `MeshManager::Remove`, which already defers the
 GPU free. This keeps engine services out of component types and puts teardown in
 one place.
+
+Object components needing an engine service do not hold engine pointers either.
+`Component::Update(delta_time, context)` receives a
+`ComponentContext` (see `VulkanEngine.ECS.ComponentContext`): the narrow view of
+granted services (the app's input system; the running physics world when
+compiled in). The engine builds the view once at Setup; a component reads only
+what was granted, and services not compiled in read as null. Prefab-spawned
+bundles (`VulkanEngine.ECS.Prefabs`) compose these plain data components on one
+entity, with engine-owned resource attachment still happening through the same
+registry hooks.
 
 ## Threading
 
