@@ -421,6 +421,7 @@ if(CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
             ecs/ComponentRegistry.cppm
             ecs/SystemSchedule.cppm
             ecs/FrameSchedule.cppm
+            modules/EngineModules.cppm
             components/Transform.cppm
             components/Camera.cppm
             components/MeshReference.cppm

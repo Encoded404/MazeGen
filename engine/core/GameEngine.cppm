@@ -29,6 +29,7 @@ export import VulkanEngine.Input;
 export import VulkanEngine.EngineContext;
 export import VulkanEngine.ECS.SystemSchedule;
 export import VulkanEngine.ECS.FrameSchedule;
+export import VulkanEngine.Modules.EngineModules;
 export import VulkanEngine.Text.TextSystem;
 export import VulkanEngine.Text.Font;
 
@@ -68,6 +69,39 @@ public:
     GameEngine& operator=(const GameEngine&) = delete;
 
     bool Setup(VulkanEngine::Application::ApplicationContext& ctx, const GameConfig& config);
+
+    // ── Engine modules ──
+    // The lifecycle seam: modules registered here are configured/started by
+    // Setup (Stage::Startup) and after the renderer comes up
+    // (Stage::Scene), and torn down in the exact reverse of the start order
+    // by Shutdown. The engine's default preset — device bootstrap, physics,
+    // resource hooks, physical camera, the frame-phase seeds — is registered
+    // through the same public surface a composed game uses, so a game adds
+    // its own engines modules with identity-based ordering and never edits
+    // the engine.
+    //
+    // Register app modules before Setup; the registry is filled by Setup's
+    // default-preset registration (and cleared first).
+    Modules::EngineModules& Modules() { return modules_; }
+    [[nodiscard]] const Modules::EngineModules& Modules() const { return modules_; }
+
+    // Replaces the engine's default technique set (the built-in DefaultMesh/
+    // Unlit registration inside init) with a game-owned registration. Call
+    // before InitRenderer; the callback receives the engine and context and
+    // must return false to abort renderer init. A game's own techniques,
+    // entry-point variant matrices and passes register here — module content,
+    // not choreography edits.
+    using TechniqueRegistrarFn =
+        std::function<bool(GameEngine&, VulkanEngine::Application::ApplicationContext&,
+                           VulkanEngine::ShaderSystem::ShaderManager&, VulkanEngine::ShaderSystem::ShaderId vert_id,
+                           VulkanEngine::ShaderSystem::ShaderId frag_id)>;
+    void SetTechniqueRegistrar(TechniqueRegistrarFn registrar) { technique_registrar_ = std::move(registrar); }
+
+    // Replaces the engine's default single-sun lighting upload (from
+    // GameConfig::lighting) at runtime. The scene renders with this from the
+    // next frame; defaults stay configuration, not init constants.
+    void UploadLighting(const SceneRenderer::SceneHeader& header,
+                        std::span<const SceneRenderer::Light> lights);
 
     // Loads and uploads a texture. The semantic and normal encoding are
     // declared content (no default; Unknown resolves to _UNORM with a one-time
@@ -272,17 +306,34 @@ private:
     // path made, registered into a FrameSchedule phase (see FrameSchedule).
     void RegisterFramePipeline();
 
+    // The engine's default module preset: device bootstrap, physics, resource
+    // hooks, physical camera and the frame-phase seeds — registered through
+    // the same public EngineModules surface a composed game uses.
+    void RegisterEngineDefaultModules();
+
+    // The engine's built-in technique set (DefaultMesh + its uv/mask variant
+    // matrix, plus Unlit): the default TechniqueRegistrar body.
+    bool RegisterEngineTechniques(VulkanEngine::Application::ApplicationContext& ctx,
+                                  VulkanEngine::ShaderSystem::ShaderManager& shaders,
+                                  VulkanEngine::ShaderSystem::ShaderId vert_id,
+                                  VulkanEngine::ShaderSystem::ShaderId frag_id);
+
+    // Dispatches to SetTechniqueRegistrar's override, else the built-in set.
+    bool RegisterTechniques(VulkanEngine::Application::ApplicationContext& ctx,
+                            VulkanEngine::ShaderSystem::ShaderManager* shader_mgr,
+                            VulkanEngine::ShaderSystem::ShaderId vert_id,
+                            VulkanEngine::ShaderSystem::ShaderId frag_id);
+
     EngineContext ctx_;
     EngineBootstrap bootstrap_;
 
     VulkanShared::ScopedHandle<void(void*)> imgui_event_token_{};
 
-#ifdef VKENGINE_PHYSICAL_CAMERA
-    VulkanShared::ScopedHandle<void(void*)> physical_camera_sdl_token_{};
-#endif
-
     VulkanBackend::Vulkan::VulkanBootstrap* vk_backend_ = nullptr;
     GameConfig config_{};
+
+    Modules::EngineModules modules_{};
+    TechniqueRegistrarFn technique_registrar_{};
 
     EntityId camera_entity_{};
 

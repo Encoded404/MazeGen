@@ -46,6 +46,17 @@ import VulkanEngine.Physics.World;
 
 export namespace VulkanEngine {
 
+/// The engine's default lighting, uploaded once at renderer init and overridable
+/// in `GameConfig` by a game (previously a hardcoded sun baked into the init
+// choreography). Values reproduced the old constants exactly.
+struct LightingDefaults {
+    std::array<float, 3> sun_direction = {0.5f, -0.707f, 0.5f};
+    // rgb + intensity in alpha
+    std::array<float, 4> sun_color = {1.0f, 0.95f, 0.9f, 2.0f};
+    // rgb + alpha reserved
+    std::array<float, 4> ambient_color = {0.03f, 0.03f, 0.03f, 1.0f};
+};
+
 struct GameConfig {
     StandardMeshPipeline::PipelineConfig pipeline_config{
         .depth_test_enable = true,
@@ -77,13 +88,10 @@ struct GameConfig {
     // relaunches and a user-data reset, which a path relative to the working
     // directory does not.
     std::string shader_cache_dir;
-    // Directory for the cooked collision-shape blobs (`PhysicsWorldConfig::
-    // shape_cache_directory`). Empty — the default — disables the disk cache and
-    // every shape is cooked at load. A cooked shape is a cache and never primary
-    // data: the blobs are keyed by Jolt version and shape hash, so a Jolt upgrade
-    // or a corrupt file is a miss that re-cooks, never a load failure. Point it at
-    // a per-user cache root, for the same reason as `shader_cache_dir`.
-    std::string physics_shape_cache_dir;
+    // Default lighting uploaded at renderer init (see LightingDefaults).
+    // Config content, not an init constant: a game overrides it here, and
+    // GameEngine::UploadLighting replaces the whole upload at runtime.
+    LightingDefaults lighting{};
     VulkanEngine::ShaderSystem::GplPolicy gpl_policy = VulkanEngine::ShaderSystem::GplPolicy::Auto;
     VulkanEngine::ShaderSystem::GplStructurePolicy gpl_structure = VulkanEngine::ShaderSystem::GplStructurePolicy::Auto;
 #ifdef VKENGINE_PHYSICAL_CAMERA
@@ -168,10 +176,10 @@ struct EngineContext {
 #endif
 
 #ifdef VKENGINE_PHYSICS
-    // The physics world (Jolt behind the Physics facade). Constructed by
-    // GameEngine::Setup, not by EngineBootstrap, because its frame contract is
-    // registered against the engine's ECS schedule. Null when physics is not
-    // compiled in.
+    // The physics world (Jolt behind the Physics facade). Constructed by the
+    // engine's default physics module (VulkanEngine.Modules.EngineModules
+    // registration in GameEngine), which also registers its frame contract and
+    // registry hooks. Null when physics is not compiled in.
     std::unique_ptr<Physics::World> physics_world;
 #endif
 

@@ -301,141 +301,260 @@ bool GameEngine::Setup(VulkanEngine::Application::ApplicationContext& ctx, const
                                                   "vulkanengine_v5" / "cache");
     }
 
-    if (!bootstrap_.Initialize(ctx_, config_, *ctx.bootstrap)) {
+    // Modules drive the rest of setup: the default preset below is registered
+    // through the same public EngineModules surface a composed game uses.
+    RegisterEngineDefaultModules();
+
+    Modules::ModuleContext mctx{};
+    mctx.app = &ctx;
+    mctx.engine = &ctx_;
+    mctx.registry = &ctx_.component_registry;
+    mctx.fixed_systems = &systems_;
+    mctx.frame_systems = &frames_;
+    mctx.config = &config_;
+
+    modules_.ConfigureAll(config_);
+    if (!modules_.StartupAll(Modules::Stage::Startup, mctx)) {
+        // Unwind in exact reverse of the start order; nothing half-initialized
+        // outlives the failed Setup.
+        modules_.ShutdownAll(mctx);
         return false;
     }
 
-#ifdef VKENGINE_PHYSICS
-    // Physics is constructed here rather than in EngineBootstrap because its
-    // frame contract is expressed against the ECS schedule and the registry's
-    // add/remove hooks, which are GameEngine state. The world itself touches no
-    // Vulkan object, so its lifetime only has to bracket the systems that call
-    // it.
-    ctx_.physics_world = std::make_unique<Physics::World>();
-    {
-        // The disk half of the cooked-shape cache is off unless the host names a
-        // directory: an empty `physics_shape_cache_dir` is the "cook everything"
-        // default, so an engine that was never told where caches live never
-        // writes one. The blobs are keyed by Jolt version and shape hash, so a
-        // stale or corrupt file is a miss that re-cooks, never a load failure.
-        Physics::PhysicsWorldConfig physics_config{};
-        physics_config.shape_cache_directory = config_.physics_shape_cache_dir;
-        if (!ctx_.physics_world->Initialize(physics_config)) {
-            LOGIFACE_LOG(error, "physics: world initialization failed");
-            ctx_.physics_world.reset();
-            return false;
-        }
-    }
-
-    // The frame contract's three physics slots, stated as constraints rather than
-    // left to registration order. A gameplay system that declares itself After
-    // PhysicsSimulate reads post-step state; Before PhysicsInput reads pre-step
-    // state. The simulate body itself is one blocking Jolt update per fixed step,
-    // on the calling thread, with Jolt fanning out onto the shared compute pool.
-    systems_.Add(
-        SystemSlot::PhysicsInput,
-        [this](ComponentRegistry& registry, float delta_time) {
-            if (ctx_.physics_world) {
-                Physics::ApplyInputs(*ctx_.physics_world, registry, delta_time);
-                // Characters are swept, not solved, so they run here: before the
-                // step, and after kinematic platforms have been pushed to their
-                // new pose, which is what lets a platform carry a character.
-                Physics::StepCharacters(*ctx_.physics_world, registry, delta_time);
-            }
-        },
-        "physics.input");
-    systems_.AddAfter(
-        SystemSlot::PhysicsInput, SystemSlot::PhysicsSimulate,
-        [this](ComponentRegistry& /*registry*/, float /*delta_time*/) {
-            if (ctx_.physics_world) ctx_.physics_world->Step();
-        },
-        "physics.simulate");
-    systems_.AddAfter(
-        SystemSlot::PhysicsSimulate, SystemSlot::PhysicsWriteBack,
-        [this](ComponentRegistry& registry, float delta_time) {
-            if (ctx_.physics_world) {
-                Physics::WriteBack(*ctx_.physics_world, registry, delta_time);
-            }
-        },
-        "physics.writeback");
-
-    // Bodies are owned by the world but created from components, so the
-    // registry's add/remove hooks are the attachment seam (the same pattern
-    // DynamicMesh uses for its GPU allocation). The hook body receives the
-    // component by reference: the registry is still inside the add when the hook
-    // fires, so the component's mask bit is not set yet and a lookup by type
-    // would find nothing.
-    ctx_.component_registry.OnAdd<Physics::RigidBody>(
-        [this](Entity& entity, Physics::RigidBody& body) {
-            if (ctx_.physics_world) Physics::AttachBody(*ctx_.physics_world, entity, body);
-        });
-    ctx_.component_registry.OnRemove<Physics::RigidBody>(
-        [this](Entity& /*entity*/, Physics::RigidBody& body) {
-            if (ctx_.physics_world) Physics::DetachBody(*ctx_.physics_world, body);
-        });
-
-    ctx_.component_registry.OnAdd<Physics::Character>(
-        [this](Entity& entity, Physics::Character& character) {
-            if (ctx_.physics_world) Physics::AttachCharacter(*ctx_.physics_world, entity, character);
-        });
-    ctx_.component_registry.OnRemove<Physics::Character>(
-        [this](Entity& /*entity*/, Physics::Character& character) {
-            if (ctx_.physics_world) Physics::DetachCharacter(*ctx_.physics_world, character);
-        });
-
-    // A collider change means a new shape set, and Jolt shapes are immutable once
-    // a body owns them, so the body is rebuilt at its live pose. This makes the
-    // add order irrelevant: adding the children before or after the RigidBody
-    // produces the same compound body.
-    ctx_.component_registry.OnAdd<Physics::Collider>(
-        [this](Entity& entity, Physics::Collider& collider) {
-            if (!ctx_.physics_world) return;
-            if (auto* body = entity.GetComponent<Physics::RigidBody>()) {
-                Physics::RebuildBody(*ctx_.physics_world, entity, *body, collider.children);
-            }
-        });
-    // On removal the children are gone by definition, so the body goes back to
-    // its single shape. The component still reads correctly here (the hook runs
-    // before the mask bit is cleared), so its size is what tells us it was empty.
-    ctx_.component_registry.OnRemove<Physics::Collider>(
-        [this](Entity& entity, Physics::Collider& /*collider*/) {
-            if (!ctx_.physics_world) return;
-            if (auto* body = entity.GetComponent<Physics::RigidBody>()) {
-                Physics::RebuildBody(*ctx_.physics_world, entity, *body, {});
-            }
-        });
-#endif
-
-    // Release a DynamicMesh entity's streamed GPU allocation when the component
-    // is removed or its entity is destroyed. Data components carry no destructor
-    // hook, so engine-owned resources are released through registry callbacks.
-    if (ctx_.mesh_manager) {
-        ctx_.component_registry.OnRemove<Components::DynamicMesh>(
-            [this](Entity& /*entity*/, Components::DynamicMesh& dynamic_mesh) {
-                if (ctx_.mesh_manager && dynamic_mesh.gpu_handle.IsValid()) {
-                    ctx_.mesh_manager->Remove(dynamic_mesh.gpu_handle);
-                }
-            });
-    }
-
-#ifdef VKENGINE_PHYSICAL_CAMERA
-    if (ctx_.physical_camera) {
-        physical_camera_sdl_token_ = ctx.platform->GetBackend().GetSdlEventProcessors().Register(
-            [this](void* sdl_event) {
-                if (ctx_.physical_camera) {
-                    ctx_.physical_camera->ProcessSdlEvent(sdl_event);
-                }
-            });
-    }
-#endif
-
-    // Seed the rendered-frame phase schedule with the engine's own frame
-    // systems — the calls the direct path made, now registrable surface. A
-    // game extends this with AddFrameSystemAfter/Before; see FrameSchedule.
-    RegisterFramePipeline();
-
     initialized_ = true;
     return true;
+}
+
+// ── The engine's default module preset ───────────────────────────────────────
+//
+// Rung 2 of the modularization: the bootstrap's job shrinks from constructing
+// everything in a fixed private order to running registered modules in a
+// resolved order. The preset below is registered through the same public
+// EngineModules surface a composed game uses — a game orders its own modules
+// against ModuleSlot identities (engine.device, engine.physics, ...) without
+// editing this engine. Physics's old five-editor wiring (a Setup block, a
+// Shutdown block, a context member, an accessor, export imports) is the
+// reference migration and lives entirely in its module now; the world pointer
+// stays in EngineContext because it is the granted service location that
+// GetPhysicsWorld and the object-component context read.
+void GameEngine::RegisterEngineDefaultModules() {
+    modules_.Clear(); // a fresh preset per Setup
+
+    using Modules::EngineModuleDesc;
+    using Modules::ModuleContext;
+    using Modules::ModuleSlot;
+    using Modules::Stage;
+
+    // 1. Device bootstrap. Owns the whole GPU resource choreography
+    //    (EngineBootstrap::Initialize) and its parallel teardown graph
+    //    (EngineBootstrap::Shutdown) as a tested artifact.
+    modules_.Add(EngineModuleDesc{
+        .stage = Stage::Startup,
+        .label = "engine.device",
+        .slot = ModuleSlot::Device,
+        .startup = [this](ModuleContext& mctx) {
+            return bootstrap_.Initialize(mctx.Ctx(), mctx.Config(), *mctx.App().bootstrap);
+        },
+        .shutdown = [this](ModuleContext& /*mctx*/) {
+            if (vk_backend_ != nullptr) {
+                bootstrap_.Shutdown(ctx_, *vk_backend_);
+            }
+        },
+    });
+
+    // 2. Physics lifecycle: the world's construction is bracketed by the
+    //    schedule, hooks and shutdown that own its frame contract.
+#ifdef VKENGINE_PHYSICS
+    {
+        // The disk half of the cooked-shape cache is off unless a host names a
+        // directory: an empty directory is the "cook everything" default, so an
+        // engine that was never told where caches live never writes one. The
+        // blobs are keyed by Jolt version and shape hash, so a stale or corrupt
+        // file is a miss that re-cooks, never a load failure. Configured by
+        // passing a custom PhysicsWorldConfig when registering this module.
+        modules_.AddAfter(
+            ModuleSlot::Device,
+            EngineModuleDesc{
+                .stage = Stage::Startup,
+                .label = "engine.physics",
+                .slot = ModuleSlot::Physics,
+                .startup = [](ModuleContext& mctx) {
+                    // Physics is constructed here rather than in EngineBootstrap
+                    // because its frame contract is expressed against the ECS
+                    // schedule and the registry's add/remove hooks. The world
+                    // itself touches no Vulkan object, so its lifetime only has
+                    // to bracket the systems that call it.
+                    auto& ctx = mctx.Ctx();
+                    Physics::PhysicsWorldConfig physics_config{};
+                    ctx.physics_world = std::make_unique<Physics::World>();
+                    if (!ctx.physics_world->Initialize(physics_config)) {
+                        LOGIFACE_LOG(error, "physics: world initialization failed");
+                        ctx.physics_world.reset();
+                        return false;
+                    }
+
+                    // The frame contract's three physics slots, stated as
+                    // constraints rather than left to registration order. A
+                    // gameplay system that declares itself After PhysicsSimulate
+                    // reads post-step state; Before PhysicsInput reads pre-step
+                    // state. The simulate body itself is one blocking Jolt update
+                    // per fixed step, on the calling thread, with Jolt fanning out
+                    // onto the shared compute pool.
+                    mctx.FixedSystems().Add(
+                        SystemSlot::PhysicsInput,
+                        [&ctx](ComponentRegistry& registry, float delta_time) {
+                            if (ctx.physics_world) {
+                                Physics::ApplyInputs(*ctx.physics_world, registry, delta_time);
+                                // Characters are swept, not solved, so they run
+                                // here: before the step, and after kinematic
+                                // platforms have been pushed to their new pose,
+                                // which is what lets a platform carry a
+                                // character.
+                                Physics::StepCharacters(*ctx.physics_world, registry, delta_time);
+                            }
+                        },
+                        "physics.input");
+                    mctx.FixedSystems().AddAfter(
+                        SystemSlot::PhysicsInput, SystemSlot::PhysicsSimulate,
+                        [&ctx](ComponentRegistry& /*registry*/, float /*delta_time*/) {
+                            if (ctx.physics_world) ctx.physics_world->Step();
+                        },
+                        "physics.simulate");
+                    mctx.FixedSystems().AddAfter(
+                        SystemSlot::PhysicsSimulate, SystemSlot::PhysicsWriteBack,
+                        [&ctx](ComponentRegistry& registry, float delta_time) {
+                            if (ctx.physics_world) {
+                                Physics::WriteBack(*ctx.physics_world, registry, delta_time);
+                            }
+                        },
+                        "physics.writeback");
+
+                    // Bodies are owned by the world but created from components,
+                    // so the registry's add/remove hooks are the attachment seam
+                    // (the same pattern DynamicMesh uses for its GPU
+                    // allocation). The hook body receives the component by
+                    // reference: the registry is still inside the add when the
+                    // hook fires, so the component's mask bit is not set yet and
+                    // a lookup by type would find nothing.
+                    auto& registry = mctx.Registry();
+                    registry.OnAdd<Physics::RigidBody>(
+                        [&ctx](Entity& entity, Physics::RigidBody& body) {
+                            if (ctx.physics_world) Physics::AttachBody(*ctx.physics_world, entity, body);
+                        });
+                    registry.OnRemove<Physics::RigidBody>(
+                        [&ctx](Entity& /*entity*/, Physics::RigidBody& body) {
+                            if (ctx.physics_world) Physics::DetachBody(*ctx.physics_world, body);
+                        });
+
+                    registry.OnAdd<Physics::Character>(
+                        [&ctx](Entity& entity, Physics::Character& character) {
+                            if (ctx.physics_world) Physics::AttachCharacter(*ctx.physics_world, entity, character);
+                        });
+                    registry.OnRemove<Physics::Character>(
+                        [&ctx](Entity& /*entity*/, Physics::Character& character) {
+                            if (ctx.physics_world) Physics::DetachCharacter(*ctx.physics_world, character);
+                        });
+
+                    // A collider change means a new shape set, and Jolt shapes
+                    // are immutable once a body owns them, so the body is
+                    // rebuilt at its live pose. This makes the add order
+                    // irrelevant: adding the children before or after the
+                    // RigidBody produces the same compound body.
+                    registry.OnAdd<Physics::Collider>(
+                        [&ctx](Entity& entity, Physics::Collider& collider) {
+                            if (!ctx.physics_world) return;
+                            if (auto* body = entity.GetComponent<Physics::RigidBody>()) {
+                                Physics::RebuildBody(*ctx.physics_world, entity, *body, collider.children);
+                            }
+                        });
+                    // On removal the children are gone by definition, so the
+                    // body goes back to its single shape. The component still
+                    // reads correctly here (the hook runs before the mask bit is
+                    // cleared), so its size is what tells us it was empty.
+                    registry.OnRemove<Physics::Collider>(
+                        [&ctx](Entity& entity, Physics::Collider& /*collider*/) {
+                            if (!ctx.physics_world) return;
+                            if (auto* body = entity.GetComponent<Physics::RigidBody>()) {
+                                Physics::RebuildBody(*ctx.physics_world, entity, *body, {});
+                            }
+                        });
+                    return true;
+                },
+                .shutdown = [this](ModuleContext& /*mctx*/) {
+                    // Shut the physics world down before the device teardown so
+                    // no simulation step can run against a half-destroyed
+                    // engine. The world owns no Vulkan object, but the systems
+                    // that call it live in this engine's schedule.
+                    if (ctx_.physics_world) {
+                        LOGIFACE_LOG(debug, std::format("physics: {} fixed steps, {} bodies",
+                                                        ctx_.physics_world->StepCount(),
+                                                        ctx_.physics_world->BodyCount()));
+                        ctx_.physics_world->Shutdown();
+                        ctx_.physics_world.reset();
+                    }
+                },
+            });
+    }
+#endif
+
+    // 3. Engine-owned resource release hooks. DynamicMesh allocations are
+    //    streamed GPU resources, and data components carry no destructor hook,
+    //    so release goes through registry callbacks.
+    modules_.Add(EngineModuleDesc{
+        .stage = Stage::Startup,
+        .label = "engine.resource_hooks",
+        .slot = ModuleSlot::ResourceHooks,
+        .startup = [this](ModuleContext& mctx) {
+            mctx.Registry().OnRemove<Components::DynamicMesh>(
+                [this](Entity& /*entity*/, Components::DynamicMesh& dynamic_mesh) {
+                    if (ctx_.mesh_manager && dynamic_mesh.gpu_handle.IsValid()) {
+                        ctx_.mesh_manager->Remove(dynamic_mesh.gpu_handle);
+                    }
+                });
+            return true;
+        },
+    });
+
+#ifdef VKENGINE_PHYSICAL_CAMERA
+    // 4. Physical camera: the optional webcam subsystem's SDL event routing.
+    //    The module owns its registration token; teardown releases it.
+    {
+        auto sdl_token = std::make_shared<VulkanShared::ScopedHandle<void(void*)>>();
+        modules_.AddAfter(
+            ModuleSlot::Device,
+            EngineModuleDesc{
+                .stage = Stage::Startup,
+                .label = "engine.physical_camera",
+                .slot = ModuleSlot::PhysicalCamera,
+                .startup = [this, sdl_token](ModuleContext& mctx) {
+                    if (!mctx.Ctx().physical_camera) return true;
+                    *sdl_token = mctx.App().platform->GetBackend().GetSdlEventProcessors().Register(
+                        [this](void* sdl_event) {
+                            if (ctx_.physical_camera) {
+                                ctx_.physical_camera->ProcessSdlEvent(sdl_event);
+                            }
+                        });
+                    return true;
+                },
+                .shutdown = [sdl_token](ModuleContext& /*mctx*/) {
+                    *sdl_token = {};
+                },
+            });
+    }
+#endif
+
+    // 5. The rendered-frame phase seeds: every call the old direct path made,
+    //    now a registrable FrameSchedule surface the game extends with
+    //    AddFrameSystemAfter/Before.
+    modules_.Add(EngineModuleDesc{
+        .stage = Stage::Startup,
+        .label = "engine.frame_pipeline",
+        .slot = ModuleSlot::FramePipeline,
+        .startup = [this](ModuleContext& /*mctx*/) {
+            RegisterFramePipeline();
+            return true;
+        },
+    });
 }
 
 uint32_t GameEngine::UploadTextureToBindless(VulkanEngine::Application::ApplicationContext& /*ctx*/,
@@ -623,58 +742,8 @@ bool GameEngine::InitRenderer(VulkanEngine::Application::ApplicationContext& ctx
     }
 
     ctx_.technique_mgr = std::make_unique<TechniqueManager::TechniqueManager>();
-    // The draw mode is resolved during Initialize (capability fallback), so the
-    // technique pipelines must specialize on the resolved mode, not the
-    // requested config_.draw_mode.
-    config_.pipeline_config.draw_mode =
-        static_cast<std::uint32_t>(ctx_.scene_renderer->GetDrawMode());
-    {
-        auto s = DebugSection("engineinit.technique_manager");
-        auto mesh_tech = std::make_unique<TechniqueManager::DefaultMeshTechnique>();
-        // Interface-variant rows: slot = uv bit (0 = inline UV0, 1 =
-        // out-of-line UV1) + mask bit (1 = the alpha-masked entry-point pair).
-        //   0 main  1 main_uv1  2 main_mask  3 main_mask_uv1
-        // Both stages of the uv1 pair must be named main_uv1 to link on the
-        // shared descriptor layout; the mask pairs reuse the same vertex
-        // shaders, since the mask is a fragment-only concern.
-        const std::array<TechniqueManager::VariantShaderPair, 4> rows = {{
-            {vert_id, frag_id},
-            {ctx_.shader_ids.main_indir_vert_uv1, ctx_.shader_ids.standard_mesh_frag_uv1},
-            {vert_id, ctx_.shader_ids.standard_mesh_frag_mask},
-            {ctx_.shader_ids.main_indir_vert_uv1, ctx_.shader_ids.standard_mesh_frag_mask_uv1},
-        }};
-        mesh_tech->SetVariantShaderRows(rows);
-        if (!mesh_tech->CompileDefaultMesh(
-                *ctx.bootstrap, *shader_mgr, *ctx_.pipeline_factory,
-                vert_id, frag_id, config_.pipeline_config,
-                *ctx_.bindless_mgr->GetLayout(),
-                *ctx_.scene_renderer->GetSubmeshVertexEntriesLayout(),
-                *ctx_.scene_renderer->GetVertexBuffersLayout(),
-                *ctx_.scene_renderer->GetIndirectionLayout(),
-                ctx_.scene_renderer->GetSceneUniformLayout())) {
-            LOGIFACE_LOG(error, "GameEngine::InitRenderer: DefaultMeshTechnique pipeline creation failed");
-            return false;
-        }
-        auto tech_id = ctx_.technique_mgr->Register(std::move(mesh_tech));
-        main_technique_id_ = tech_id.value;
-        // The technique's base group (no render-state variant) is seeded at
-        // registration and carries the technique id.
-        main_draw_group_ = ctx_.technique_mgr->InternDrawGroup(tech_id.value, 0, 0);
-        // Unlit technique: same engine sets + PerMaterial layout as the main
-        // technique, but paired with the unlit fragment shader (no lighting).
-        auto unlit_tech = std::make_unique<TechniqueManager::UnlitTextureTechnique>();
-        if (!unlit_tech->CompileUnlit(
-                *ctx.bootstrap, *shader_mgr, *ctx_.pipeline_factory,
-                vert_id, ctx_.shader_ids.unlit_frag, config_.pipeline_config,
-                *ctx_.bindless_mgr->GetLayout(),
-                *ctx_.scene_renderer->GetSubmeshVertexEntriesLayout(),
-                *ctx_.scene_renderer->GetVertexBuffersLayout(),
-                *ctx_.scene_renderer->GetIndirectionLayout(),
-                ctx_.scene_renderer->GetSceneUniformLayout())) {
-            LOGIFACE_LOG(error, "GameEngine::InitRenderer: UnlitTextureTechnique pipeline creation failed");
-            return false;
-        }
-        ctx_.technique_mgr->Register(std::move(unlit_tech));
+    if (!RegisterTechniques(ctx, shader_mgr, vert_id, frag_id)) {
+        return false;
     }
 
     {
@@ -682,21 +751,19 @@ bool GameEngine::InitRenderer(VulkanEngine::Application::ApplicationContext& ctx
         ctx_.material_mgr.Initialize(&ctx_.staging_pool);
         ctx_.material_mgr.SetTechniqueManager(ctx_.technique_mgr.get());
 
-        // Upload initial lighting data via staging
+        // Upload the configured default lighting (see GameConfig::lighting; a
+        // game overrides the values there, or at runtime with UploadLighting)
+        // via staging. These defaults are the old hardcoded init constants.
         {
+            const LightingDefaults& lighting = config_.lighting;
             SceneRenderer::SceneHeader header{};
-            header.ambient_color[0] = 0.03f; header.ambient_color[1] = 0.03f;
-            header.ambient_color[2] = 0.03f; header.ambient_color[3] = 1.0f;
-            header.sun_direction[0] = 0.5f; header.sun_direction[1] = -0.707f;
-            header.sun_direction[2] = 0.5f;
-            header.sun_color[0] = 1.0f; header.sun_color[1] = 0.95f;
-            header.sun_color[2] = 0.9f; header.sun_color[3] = 2.0f;
+            std::ranges::copy(lighting.ambient_color, std::begin(header.ambient_color));
+            std::ranges::copy(lighting.sun_direction, std::begin(header.sun_direction));
+            std::ranges::copy(lighting.sun_color, std::begin(header.sun_color));
 
             SceneRenderer::Light sun_light{};
-            sun_light.direction[0] = 0.5f; sun_light.direction[1] = -0.707f;
-            sun_light.direction[2] = 0.5f;
-            sun_light.color[0] = 1.0f; sun_light.color[1] = 0.95f;
-            sun_light.color[2] = 0.9f; sun_light.color[3] = 2.0f;
+            std::ranges::copy(lighting.sun_direction, std::begin(sun_light.direction));
+            std::ranges::copy(lighting.sun_color, std::begin(sun_light.color));
             sun_light.position[3] = 0.0f; // type = directional
 
             std::array<SceneRenderer::Light, 1> lights = {sun_light};
@@ -801,8 +868,99 @@ bool GameEngine::InitRenderer(VulkanEngine::Application::ApplicationContext& ctx
         ctx_.shader_watcher->Start();
     }
 
+    // Renderer init is done, so scene-stage modules (scene building, resource
+    // loads, cameras) start here through the module registry the game filled
+    // before Setup.
+    Modules::ModuleContext mctx{};
+    mctx.app = &ctx;
+    mctx.engine = &ctx_;
+    mctx.registry = &ctx_.component_registry;
+    mctx.fixed_systems = &systems_;
+    mctx.frame_systems = &frames_;
+    mctx.config = &config_;
+    if (!modules_.StartupAll(Modules::Stage::Scene, mctx)) {
+        modules_.ShutdownAll(mctx);
+        return false;
+    }
+
     return true;
 }
+
+
+/// The engine's built-in technique set, exactly as init hardcoded it. Served
+/// through GameEngine::SetTechniqueRegistrar when a game replaces it with its
+/// own technique/entry-point-matrix registration.
+bool GameEngine::RegisterEngineTechniques(VulkanEngine::Application::ApplicationContext& ctx,
+                                          VulkanEngine::ShaderSystem::ShaderManager& shader_mgr,
+                                          VulkanEngine::ShaderSystem::ShaderId vert_id,
+                                          VulkanEngine::ShaderSystem::ShaderId frag_id) {
+    // The draw mode is resolved during SceneRenderer::Initialize (capability
+    // fallback), so the technique pipelines must specialize on the resolved
+    // mode, not the requested config_.draw_mode.
+    config_.pipeline_config.draw_mode =
+        static_cast<std::uint32_t>(ctx_.scene_renderer->GetDrawMode());
+    {
+        auto s = DebugSection("engineinit.technique_manager");
+        auto mesh_tech = std::make_unique<TechniqueManager::DefaultMeshTechnique>();
+        // Interface-variant rows: slot = uv bit (0 = inline UV0, 1 =
+        // out-of-line UV1) + mask bit (1 = the alpha-masked entry-point pair).
+        //   0 main  1 main_uv1  2 main_mask  3 main_mask_uv1
+        // Both stages of the uv1 pair must be named main_uv1 to link on the
+        // shared descriptor layout; the mask pairs reuse the same vertex
+        // shaders, since the mask is a fragment-only concern.
+        const std::array<TechniqueManager::VariantShaderPair, 4> rows = {{
+            {vert_id, frag_id},
+            {ctx_.shader_ids.main_indir_vert_uv1, ctx_.shader_ids.standard_mesh_frag_uv1},
+            {vert_id, ctx_.shader_ids.standard_mesh_frag_mask},
+            {ctx_.shader_ids.main_indir_vert_uv1, ctx_.shader_ids.standard_mesh_frag_mask_uv1},
+        }};
+        mesh_tech->SetVariantShaderRows(rows);
+        if (!mesh_tech->CompileDefaultMesh(
+                *ctx.bootstrap, shader_mgr, *ctx_.pipeline_factory,
+                vert_id, frag_id, config_.pipeline_config,
+                *ctx_.bindless_mgr->GetLayout(),
+                *ctx_.scene_renderer->GetSubmeshVertexEntriesLayout(),
+                *ctx_.scene_renderer->GetVertexBuffersLayout(),
+                *ctx_.scene_renderer->GetIndirectionLayout(),
+                ctx_.scene_renderer->GetSceneUniformLayout())) {
+            LOGIFACE_LOG(error, "GameEngine::InitRenderer: DefaultMeshTechnique pipeline creation failed");
+            return false;
+        }
+        auto tech_id = ctx_.technique_mgr->Register(std::move(mesh_tech));
+        main_technique_id_ = tech_id.value;
+        // The technique's base group (no render-state variant) is seeded at
+        // registration and carries the technique id.
+        main_draw_group_ = ctx_.technique_mgr->InternDrawGroup(tech_id.value, 0, 0);
+        // Unlit technique: same engine sets + PerMaterial layout as the main
+        // technique, but paired with the unlit fragment shader (no lighting).
+        auto unlit_tech = std::make_unique<TechniqueManager::UnlitTextureTechnique>();
+        if (!unlit_tech->CompileUnlit(
+                *ctx.bootstrap, shader_mgr, *ctx_.pipeline_factory,
+                vert_id, ctx_.shader_ids.unlit_frag, config_.pipeline_config,
+                *ctx_.bindless_mgr->GetLayout(),
+                *ctx_.scene_renderer->GetSubmeshVertexEntriesLayout(),
+                *ctx_.scene_renderer->GetVertexBuffersLayout(),
+                *ctx_.scene_renderer->GetIndirectionLayout(),
+                ctx_.scene_renderer->GetSceneUniformLayout())) {
+            LOGIFACE_LOG(error, "GameEngine::InitRenderer: UnlitTextureTechnique pipeline creation failed");
+            return false;
+        }
+        ctx_.technique_mgr->Register(std::move(unlit_tech));
+    }
+    return true;
+}
+
+/// The default technique registrar, or the game's override when one is set.
+bool GameEngine::RegisterTechniques(VulkanEngine::Application::ApplicationContext& ctx,
+                                    VulkanEngine::ShaderSystem::ShaderManager* shader_mgr,
+                                    VulkanEngine::ShaderSystem::ShaderId vert_id,
+                                    VulkanEngine::ShaderSystem::ShaderId frag_id) {
+    if (technique_registrar_) {
+        return technique_registrar_(*this, ctx, *shader_mgr, vert_id, frag_id);
+    }
+    return RegisterEngineTechniques(ctx, *shader_mgr, vert_id, frag_id);
+}
+
 
 bool GameEngine::SetDrawMode(SceneRenderer::DrawMode requested) {
     if (!initialized_ || !ctx_.scene_renderer || !ctx_.technique_mgr) {
@@ -1011,34 +1169,34 @@ void GameEngine::FrameRender(const VulkanEngine::Application::ApplicationContext
 void GameEngine::Shutdown() {
     if (!initialized_) return;
 
-#ifdef VKENGINE_PHYSICS
-    // Shut the physics world down before the device teardown so no simulation
-    // step can run against a half-destroyed engine. The world owns no Vulkan
-    // object, but the systems that call it live in this engine's schedule.
-    if (ctx_.physics_world) {
-        LOGIFACE_LOG(debug, std::format("physics: {} fixed steps, {} bodies",
-                                        ctx_.physics_world->StepCount(),
-                                        ctx_.physics_world->BodyCount()));
-        ctx_.physics_world->Shutdown();
-        ctx_.physics_world.reset();
-    }
-#endif
-
-    if (vk_backend_) {
-        bootstrap_.Shutdown(ctx_, *vk_backend_);
-    }
+    // Registered modules tear down in the exact reverse of their start order
+    // across all stages: camera event routing, resource hooks, the physics
+    // world, then the device teardown graph. The shutdown context carries no
+    // application loop (Shutdown has no ApplicationContext), so module
+    // shutdowns must not read it.
+    Modules::ModuleContext mctx{};
+    mctx.engine = &ctx_;
+    mctx.registry = &ctx_.component_registry;
+    mctx.fixed_systems = &systems_;
+    mctx.frame_systems = &frames_;
+    mctx.config = &config_;
+    modules_.ShutdownAll(mctx);
 
     imgui_event_token_ = {};
-#ifdef VKENGINE_PHYSICAL_CAMERA
-    physical_camera_sdl_token_ = {};
-#endif
 
-    if (scene_valid_) {
-        scene_valid_ = false;
-    }
+    scene_valid_ = false;
 
     initialized_ = false;
     vk_backend_ = nullptr;
+}
+
+void GameEngine::UploadLighting(const SceneRenderer::SceneHeader& header,
+                                std::span<const SceneRenderer::Light> lights) {
+    if (!ctx_.scene_renderer) {
+        LOGIFACE_LOG(warn, "GameEngine::UploadLighting: engine is not initialized");
+        return;
+    }
+    ctx_.scene_renderer->UploadLighting(header, lights, ctx_.staging_pool);
 }
 
 } // namespace VulkanEngine
