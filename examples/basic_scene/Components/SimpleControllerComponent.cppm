@@ -18,19 +18,33 @@ import logiface;
 
 
 import VulkanEngine.ECS.ComponentRegistry;
+import VulkanEngine.ECS.ComponentContext;
 import VulkanEngine.Input;
 import VulkanEngine.Components.Transform;
 
 export namespace Examples::BasicScene::Components {
 
 // Object component: owns input bindings and drives its entity's Transform.
+// Engine services come from the granted ComponentContext in Update — no
+// engine pointer is stored at the construction site.
 class SimpleControllerComponent : public VulkanEngine::Component {
 public:
-    explicit SimpleControllerComponent(VulkanEngine::Input::InputSystem* input_system) noexcept
-        : input_system_(input_system) {}
+    SimpleControllerComponent() noexcept = default;
 
-    void OnAttach(VulkanEngine::Entity& /*owner*/) override {
-        if (!input_system_) return;
+    void Update(float delta_time, const VulkanEngine::ComponentContext& context) override {
+        auto* input_system = context.Input();
+        if (input_system_ == nullptr) {
+            // First update: the granted context binds the actions lazily
+            // (OnAttach no longer receives a service view).
+            if (input_system == nullptr) return;
+            input_system_ = input_system;
+            BindActions(*input_system);
+        }
+        MoveAndSpin(*input_system, delta_time);
+    }
+
+private:
+    void BindActions(VulkanEngine::Input::InputSystem& input_system) {
         // One 2D action for both keyboard (WASD) and the gamepad's left stick.
         move_ = input_system_->BindAction<2>("move", VulkanEngine::Input::ActionConfig{
             .processing = VulkanEngine::Input::ActionProcessing::ClampLength,
@@ -41,12 +55,10 @@ public:
         move_.Bind(VulkanEngine::Input::InputBinding::Key(SDLK_S).Component(1, -1.0f));
         move_.BindGamepadStick(SDL_GAMEPAD_AXIS_LEFTX, SDL_GAMEPAD_AXIS_LEFTY);
 
-        pause_spin_handle_ = input_system_->BindAction("pause_spin", VulkanEngine::Input::InputBinding::MouseButton(SDL_BUTTON_LEFT));
+        pause_spin_handle_ = input_system.BindAction("pause_spin", VulkanEngine::Input::InputBinding::MouseButton(SDL_BUTTON_LEFT));
     }
 
-    void Update(float delta_time) override {
-        if (!input_system_) return;
-
+    void MoveAndSpin(VulkanEngine::Input::InputSystem& input_system, float delta_time) {
         auto* transform = GetOwner() != nullptr ? GetOwner()->GetComponent<VulkanEngine::Components::Transform>() : nullptr;
         if (transform == nullptr) {
             return;
@@ -57,7 +69,7 @@ public:
         transform->position.x += move[0] * move_speed * delta_time;
         transform->position.y += move[1] * move_speed * delta_time;
 
-        if (!input_system_->IsActionActive(pause_spin_handle_)) {
+        if (!input_system.IsActionActive(pause_spin_handle_)) {
             const auto yaw = glm::angleAxis(glm::radians(delta_time * 90.0f), glm::vec3(0.0f, 1.0f, 0.0f));
             LOGIFACE_LOG(trace, "Applying rotation: " + glm::to_string(glm::eulerAngles(yaw)) + " degrees");
 #ifndef NDEBUG

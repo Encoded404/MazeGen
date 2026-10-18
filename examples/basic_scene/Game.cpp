@@ -208,7 +208,9 @@ bool DemoGame::OnSetup(VulkanEngine::Application::ApplicationContext& ctx) {
         component_registry.AddComponent<VulkanEngine::Components::Transform>(entity);
         auto& mesh_ref = component_registry.AddComponent<VulkanEngine::Components::MeshReference>(entity);
         mesh_ref.loaded_mesh_id = monkey_id;
-        component_registry.AddComponent<Examples::BasicScene::Components::SimpleControllerComponent>(entity, ctx.input_system);
+        // No service wiring: the component receives the granted ComponentContext
+        // in Update (rung 3).
+        component_registry.AddComponent<Examples::BasicScene::Components::SimpleControllerComponent>(entity);
     }
 #ifdef VKENGINE_PHYSICAL_CAMERA
     if (webcam_mesh_id_ != 0) {

@@ -418,9 +418,11 @@ if(CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
             bootstrap/Startup.cppm
             ApplicationContext.cppm
             ecs/Entity.cppm
+            ecs/ComponentContext.cppm
             ecs/ComponentRegistry.cppm
             ecs/SystemSchedule.cppm
             ecs/FrameSchedule.cppm
+            ecs/Prefabs.cppm
             modules/EngineModules.cppm
             components/Transform.cppm
             components/Camera.cppm

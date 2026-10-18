@@ -321,6 +321,15 @@ bool GameEngine::Setup(VulkanEngine::Application::ApplicationContext& ctx, const
         return false;
     }
 
+    // Grant the object-component service view (see ComponentContext): the
+    // app's input system and whatever engine subsystems just started. Built
+    // once here; Update receives the view instead of every component storing
+    // an engine pointer.
+    component_context_.input = ctx.input_system;
+#ifdef VKENGINE_PHYSICS
+    component_context_.physics_world = ctx_.physics_world.get();
+#endif
+
     initialized_ = true;
     return true;
 }
@@ -1126,7 +1135,8 @@ void GameEngine::FixedUpdate(const VulkanEngine::Application::ApplicationContext
     // than once per rendered frame; nothing here may touch per-frame render state.
     ctx_.component_registry.ApplyStructuralChanges();
     systems_.Run(ctx_.component_registry, ctx.frame.fixed_delta_time);
-    ctx_.component_registry.UpdateAllComponentsAsync(ctx.frame.fixed_delta_time);
+    ctx_.component_registry.UpdateAllComponentsAsync(ctx.frame.fixed_delta_time,
+                                                     component_context_);
     ctx_.component_registry.ApplyStructuralChanges();
 }
 

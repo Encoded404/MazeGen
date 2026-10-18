@@ -5,7 +5,9 @@ import std;
 import logiface;
 import test_logging;
 
+import VulkanEngine.ECS.ComponentContext;
 import VulkanEngine.ECS.ComponentRegistry;
+import VulkanEngine.Input;
 
 namespace {
 
@@ -19,15 +21,21 @@ public:
 
     void OnAttach(VulkanEngine::Entity& /*owner*/) override { attached_ = true; }
 
-    void Update(float delta_time) override {
+    void Update(float delta_time, const VulkanEngine::ComponentContext& context) override {
         updated_ = true;
         last_delta_time_ = delta_time;
+        last_context_ = &context;
+    }
+
+    [[nodiscard]] const VulkanEngine::ComponentContext* GetLastContext() const noexcept {
+        return last_context_;
     }
 
 private:
     bool attached_ = false;
     bool updated_ = false;
     float last_delta_time_ = 0.0f;
+    const VulkanEngine::ComponentContext* last_context_ = nullptr;
 };
 
 // Data components: plain structs, so they live in dense columns.
@@ -67,9 +75,15 @@ TEST(ComponentSystemTest, ObjectComponentReceivesOnAttachAndUpdate) {
     EXPECT_TRUE(entity.HasComponent<RegistryProbeComponent>());
     EXPECT_EQ(entity.GetComponent<RegistryProbeComponent>(), &component);
 
-    registry.UpdateAllComponentsAsync(0.25f);
+    VulkanEngine::Input::InputSystem granted{};
+    VulkanEngine::ComponentContext context{};
+    context.input = &granted;
+    registry.UpdateAllComponentsAsync(0.25f, context);
     EXPECT_TRUE(component.WasUpdated());
     EXPECT_FLOAT_EQ(component.GetLastDeltaTime(), 0.25f);
+    // The granted view is what the update received — service access by grant,
+    // not by construction-site injection.
+    EXPECT_EQ(component.GetLastContext()->input, context.input);
 }
 
 TEST(ComponentSystemTest, DuplicateAddDoesNotReplaceTheStoredComponent) {

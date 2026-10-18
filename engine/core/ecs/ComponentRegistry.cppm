@@ -37,6 +37,7 @@ import std;
 import std.compat;
 
 export import VulkanEngine.ECS.Entity;
+export import VulkanEngine.ECS.ComponentContext;
 
 import VulkanShared.Jobs;
 
@@ -60,8 +61,10 @@ public:
     // destroyed, while the component is still intact.
     virtual void OnDetach(Entity& /*owner*/) {}
     // Per-step behavior for object components. Data components are driven by
-    // systems instead.
-    virtual void Update(float /*delta_time*/) {}
+    // systems instead. `context` is the engine-granted service view (see
+    // ComponentContext): a component reads only what was granted and stores no
+    // engine pointer of its own.
+    virtual void Update(float /*delta_time*/, const ComponentContext& /*context*/) {}
 
     void SetOwner(Entity* entity) noexcept { owner_ = entity; }
     [[nodiscard]] Entity* GetOwner() const noexcept { return owner_; }
@@ -437,7 +440,7 @@ public:
     }
 
     // ── Object-component behavior ──
-    void UpdateAllComponentsAsync(float delta_time) {
+    void UpdateAllComponentsAsync(float delta_time, const ComponentContext& context = {}) {
         std::vector<Component*> components;
         {
             const std::scoped_lock lock(mutex_);
@@ -448,8 +451,9 @@ public:
         if (components.empty()) return;
 
         VulkanShared::JobScheduler::Global().ParallelFor(components.size(),
-            [delta_time, components = std::move(components)](const std::size_t index) mutable {
-                components[index]->Update(delta_time);
+            [delta_time, &context, components = std::move(components)](
+                const std::size_t index) mutable {
+                components[index]->Update(delta_time, context);
             });
     }
 

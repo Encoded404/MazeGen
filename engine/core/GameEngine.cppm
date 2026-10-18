@@ -283,6 +283,11 @@ public:
     std::uint16_t GetMainTechniqueIdRaw() const { return main_technique_id_; }
     VulkanEngine::TechniqueManager::TechniqueId GetMainTechniqueId() const { return VulkanEngine::TechniqueManager::TechniqueId{main_technique_id_}; }
     std::uint16_t GetMainDrawGroup() const { return main_draw_group_; }
+    // The service view granted to object components (see ComponentContext),
+    // built once during Setup from the app-provided input system and the
+    // running engine subsystems. Object components receive it in Update and
+    // store no engine pointer of their own.
+    [[nodiscard]] const ComponentContext& GetComponentContext() const { return component_context_; }
     bool IsInitialized() const { return initialized_; }
     void MarkSceneValid() { scene_valid_ = true; }
     std::uint32_t UploadTextureToBindless(VulkanEngine::Application::ApplicationContext& ctx,
@@ -343,6 +348,9 @@ private:
     // Rendered-frame phase systems, in phase + registration order
     // (see AddFrameSystem).
     FrameSchedule frames_{};
+
+    // The granted service view for object components (see GetComponentContext).
+    ComponentContext component_context_{};
 
     std::uint16_t main_technique_id_ = 0;
     std::uint16_t main_draw_group_ = 0;

@@ -29,7 +29,7 @@ public:
     int texture_slot = 0;
     // NOLINTEND(misc-non-private-member-variables-in-classes)
 
-    void Update(float /*delta_time*/) override {
+    void Update(float /*delta_time*/, const VulkanEngine::ComponentContext& /*context*/) override {
         auto* transform = GetOwner() != nullptr ? GetOwner()->GetComponent<VulkanEngine::Components::Transform>() : nullptr;
         if (transform) {
             transform->position = position;

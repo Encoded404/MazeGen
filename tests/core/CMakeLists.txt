@@ -53,6 +53,7 @@ add_executable(engine_tests
   text_system_tests.cpp
   frame_schedule_tests.cpp
   engine_modules_tests.cpp
+  prefab_tests.cpp
 )
 target_link_libraries(engine_tests PRIVATE ${ENGINE_TARGET} ${BACKEND_TARGET})
 
