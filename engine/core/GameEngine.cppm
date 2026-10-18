@@ -63,7 +63,7 @@ using VulkanEngine::Textures::SamplerDesc;
 
 class GameEngine {
 public:
-    GameEngine() = default;
+    GameEngine();
     ~GameEngine();
     GameEngine(const GameEngine&) = delete;
     GameEngine& operator=(const GameEngine&) = delete;
@@ -313,8 +313,14 @@ private:
 
     // The engine's default module preset: device bootstrap, physics, resource
     // hooks, physical camera and the frame-phase seeds — registered through
-    // the same public EngineModules surface a composed game uses.
+    // the same public EngineModules surface a composed game uses. Called by
+    // the constructor (no runtime state is needed to register), so a composed
+    // game composes against the preset slots any time before Setup.
     void RegisterEngineDefaultModules();
+
+    // Wipes the registry and re-registers the preset: the teardown of a
+    // Shutdown or a failed startup leaves a fresh engine ready for Setup.
+    void RestoreDefaultModules();
 
     // The engine's built-in technique set (DefaultMesh + its uv/mask variant
     // matrix, plus Unlit): the default TechniqueRegistrar body.

@@ -268,6 +268,13 @@ void GameEngine::RegisterFramePipeline() {
         "frame.render_submit");
 }
 
+GameEngine::GameEngine() {
+    // The default preset registers at construction, with no runtime state
+    // needed: a composed game therefore composes against the preset's identity
+    // slots (engine.device, engine.physics, ...) any time before Setup.
+    RegisterEngineDefaultModules();
+}
+
 GameEngine::~GameEngine() {
     if (initialized_) {
         Shutdown();
@@ -301,10 +308,9 @@ bool GameEngine::Setup(VulkanEngine::Application::ApplicationContext& ctx, const
                                                   "vulkanengine_v5" / "cache");
     }
 
-    // Modules drive the rest of setup: the default preset below is registered
-    // through the same public EngineModules surface a composed game uses.
-    RegisterEngineDefaultModules();
-
+    // Modules drive the rest of setup. The default preset registered at
+    // construction — through the same public EngineModules surface a composed
+    // game uses — now runs its configures and startups in resolved order.
     Modules::ModuleContext mctx{};
     mctx.app = &ctx;
     mctx.engine = &ctx_;
@@ -318,6 +324,7 @@ bool GameEngine::Setup(VulkanEngine::Application::ApplicationContext& ctx, const
         // Unwind in exact reverse of the start order; nothing half-initialized
         // outlives the failed Setup.
         modules_.ShutdownAll(mctx);
+        RestoreDefaultModules();
         return false;
     }
 
@@ -346,9 +353,16 @@ bool GameEngine::Setup(VulkanEngine::Application::ApplicationContext& ctx, const
 // reference migration and lives entirely in its module now; the world pointer
 // stays in EngineContext because it is the granted service location that
 // GetPhysicsWorld and the object-component context read.
-void GameEngine::RegisterEngineDefaultModules() {
-    modules_.Clear(); // a fresh preset per Setup
+void GameEngine::RestoreDefaultModules() {
+    modules_.Clear();
+    RegisterEngineDefaultModules();
+}
 
+void GameEngine::RegisterEngineDefaultModules() {
+    // No Clear() here on purpose: a composed game registers its own modules
+    // before Setup, and they must survive alongside the preset. ShutdownAll()
+    // + Clear() in Shutdown()/the failure paths keep a re-Setup from hitting
+    // duplicate preset slots.
     using Modules::EngineModuleDesc;
     using Modules::ModuleContext;
     using Modules::ModuleSlot;
@@ -889,6 +903,7 @@ bool GameEngine::InitRenderer(VulkanEngine::Application::ApplicationContext& ctx
     mctx.config = &config_;
     if (!modules_.StartupAll(Modules::Stage::Scene, mctx)) {
         modules_.ShutdownAll(mctx);
+        RestoreDefaultModules();
         return false;
     }
 
@@ -1191,6 +1206,7 @@ void GameEngine::Shutdown() {
     mctx.frame_systems = &frames_;
     mctx.config = &config_;
     modules_.ShutdownAll(mctx);
+    RestoreDefaultModules(); // a fresh Setup re-registers the preset cleanly
 
     imgui_event_token_ = {};
 
