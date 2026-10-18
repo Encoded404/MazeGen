@@ -58,6 +58,216 @@ VulkanShared::ScopedSection DebugSection(const std::string& name) {
 
 } // namespace
 
+// ── The engine's default frame-phase systems ─────────────────────────────────
+//
+// Rung 1 of the modularization: each call the hardcoded per-frame pipeline used
+// to make is registered here, into the FrameSchedule phase it belongs to, in
+// exactly the order the old choreography ran it. A game that registers nothing
+// observes this order — the same calls, the same sequence — and every check the
+// old choreography performed per block stays in the block that owns it.
+void GameEngine::RegisterFramePipeline() {
+    // Screen text is authored in logical points while the overlay pass and the
+    // glyph rasterizer are in physical pixels, so the ratio between them is
+    // pushed here: once per frame, before any hook that submits text, and
+    // deliberately not gated on the scene being valid, because a frame with no
+    // valid scene still draws its UI. The platform owns the value; the text
+    // system does not read a window it does not own.
+    frames_.Add(
+        FramePhase::Bridge, FrameSlot::TextDisplayScale,
+        [](FramePhaseContext& fctx) {
+            EngineContext& ctx = fctx.Engine();
+            Application::ApplicationContext& app = fctx.App();
+            if (ctx.text_system != nullptr && app.platform_state != nullptr) {
+                ctx.text_system->SetDisplayScale(app.platform_state->content_scale);
+            }
+        },
+        "frame.text_display_scale");
+
+    {
+        // Index every engine FIF ring (dynamic mesh uploads, per-frame
+        // descriptors, frame block arrays) with the monotonic frame counter
+        // modulo the pipeline depth. Image indices must never drive FIF slot
+        // selection.
+        frames_.Add(
+            FramePhase::Bridge, FrameSlot::MeshProcessFrame,
+            [this](FramePhaseContext& fctx) {
+                if (!ctx_.mesh_manager) {
+                    LOGIFACE_LOG(warn, "Game::FrameUpdate: mesh_manager is null, skipping ProcessFrame");
+                    return;
+                }
+                if (!scene_valid_) {
+                    LOGIFACE_LOG(warn, "Game::FrameUpdate: scene_valid_ is false, skipping ProcessFrame");
+                    return;
+                }
+                Application::ApplicationContext& app = fctx.App();
+                const std::uint32_t fif = app.bootstrap->GetBackend().GetFramesInFlight();
+                const std::uint32_t frame_index = app.frame.frame_counter % fif;
+                ctx_.mesh_render_system.ProcessFrame(
+                    ctx_.component_registry,
+                    ctx_.mesh_registry,
+                    *ctx_.mesh_manager,
+                    *ctx_.scene_renderer,
+                    ctx_.vertex_heap,
+                    ctx_.index_heap,
+                    ctx_.material_mgr,
+                    frame_index);
+            },
+            "frame.mesh_process");
+    }
+
+    // The mesh manager's per-frame retire rides the same FIF slot as the
+    // uploads, so it runs before the frame records.
+    frames_.Add(
+        FramePhase::PreRecord, FrameSlot::MeshEndFrame,
+        [this](FramePhaseContext& fctx) {
+            if (ctx_.mesh_manager) {
+                Application::ApplicationContext& app = fctx.App();
+                const std::uint32_t fif = app.bootstrap->GetBackend().GetFramesInFlight();
+                ctx_.mesh_manager->EndFrame(app.frame.frame_counter % fif);
+            }
+        },
+        "frame.mesh_end");
+
+    // Pump finished async uploads into staged images before the frame records.
+    frames_.Add(
+        FramePhase::PreRecord, FrameSlot::TextureUploadPump,
+        [this](FramePhaseContext& fctx) {
+            if (!ctx_.texture_uploader) return;
+            Application::ApplicationContext& app = fctx.App();
+            ctx_.texture_uploader->BeginFrame(
+                app.frame.frame_counter,
+                [&app](std::uint32_t recording_frame) {
+                    return app.bootstrap->IsFrameComplete(recording_frame);
+                });
+        },
+        "frame.texture_upload_pump");
+
+    // Drain deferred bindless descriptor ops (uploads published, released slots
+    // returned to the free list, retired bindings destroyed). This runs after
+    // AcquireNextImage has waited the ring's in-flight fence for this slot, so
+    // any op from `frame_counter - FIF` is GPU-safe. A gated publish applies
+    // only when its recording frame was actually submitted.
+    frames_.Add(
+        FramePhase::PreRecord, FrameSlot::BindlessDrain,
+        [this](FramePhaseContext& fctx) {
+            if (!ctx_.bindless_mgr) return;
+            Application::ApplicationContext& app = fctx.App();
+            ctx_.bindless_mgr->BeginFrame(
+                app.frame.frame_counter,
+                [&app](std::uint32_t recording_frame) {
+                    return app.bootstrap->IsFrameComplete(recording_frame);
+                },
+                [](BindlessManager::TextureHandle handle, std::uint32_t /*frame*/) {
+                    LOGIFACE_LOG(warn, "BindlessManager: dropped a publish for slot " +
+                                           std::to_string(handle.slot) + " (recording frame not submitted)");
+                });
+        },
+        "frame.bindless_drain");
+
+#ifdef VKENGINE_HOT_RELOAD
+    // Texture hot reload: apply completed slot swaps and reload changed files.
+    // Runs after the bindless drain so a published new binding is visible, and
+    // before materials flush so the rewritten slots reach the GPU this frame.
+    frames_.Add(
+        FramePhase::PreRecord, FrameSlot::TextureReloadPump,
+        [this](FramePhaseContext& fctx) {
+            if (!ctx_.texture_reloader) return;
+            (void)ctx_.texture_reloader->Pump(fctx.App().frame.frame_counter);
+        },
+        "frame.texture_reload_pump");
+    // Font hot reload is pumped exactly alongside it: the same point in the
+    // frame, after the bindless drain so a page retired by a reload is applied
+    // at the right ring, and before the pass records so the reload is visible
+    // to the frame being built.
+    frames_.Add(
+        FramePhase::PreRecord, FrameSlot::FontReloadPump,
+        [this](FramePhaseContext& fctx) {
+            if (!ctx_.font_reloader) return;
+            (void)ctx_.font_reloader->Pump(fctx.App().frame.frame_counter);
+        },
+        "frame.font_reload_pump");
+#endif
+
+    // Whole-texture residency: evict least-recently-used textures when the
+    // resident set exceeds the device memory budget. Inert when no budget is
+    // available. Eviction goes through the deferred bindless release, so a
+    // slot's descriptor is reset to the fallback at the ring drain and no
+    // in-flight frame samples a destroyed image.
+    frames_.Add(
+        FramePhase::PreRecord, FrameSlot::ResidencyCollect,
+        [this](FramePhaseContext& fctx) {
+            if (!ctx_.texture_residency || !ctx_.texture_residency->IsEnabled()) return;
+            Application::ApplicationContext& app = fctx.App();
+            const std::uint32_t residency_fif = app.bootstrap->GetBackend().GetFramesInFlight();
+            (void)ctx_.texture_residency->Collect(app.frame.frame_counter,
+                                                  /*min_residency_frames=*/residency_fif);
+        },
+        "frame.residency_collect");
+
+    // Flush dirty material data to GPU before rendering
+    frames_.Add(
+        FramePhase::PreRecord, FrameSlot::MaterialFlush,
+        [this](FramePhaseContext& /*fctx*/) {
+            ctx_.material_mgr.FlushDirtyMaterials();
+        },
+        "frame.material_flush");
+
+    // Rebuild technique pipelines whose shaders changed (hot reload)
+    frames_.Add(
+        FramePhase::PreRecord, FrameSlot::TechniquePoll,
+        [this](FramePhaseContext& fctx) {
+            if (!ctx_.technique_mgr) return;
+            const auto frame_index = fctx.App().bootstrap->GetSnapshot().frame_index;
+            ctx_.technique_mgr->PollShaders(*ctx_.shader_manager, *ctx_.pipeline_factory,
+                                            frame_index);
+        },
+        "frame.technique_poll");
+
+#ifdef VKENGINE_PHYSICAL_CAMERA
+    frames_.Add(
+        FramePhase::PreRecord, FrameSlot::PhysicalCameraPoll,
+        [this](FramePhaseContext& fctx) {
+            if (!ctx_.physical_camera) return;
+            const auto frame_index = fctx.App().bootstrap->GetSnapshot().frame_index;
+            ctx_.physical_camera->PollShaders(frame_index);
+        },
+        "frame.physical_camera_poll");
+#endif
+
+    // Render submission is a Record-phase participant, not the phase itself.
+    frames_.Add(
+        FramePhase::Record, FrameSlot::RenderSubmit,
+        [this](FramePhaseContext& fctx) {
+            if (!ctx_.renderer) {
+                LOGIFACE_LOG(warn, "Game::FrameRender: renderer is null, skipping");
+                return;
+            }
+            Components::Camera* const camera = GetCamera();
+            if (camera == nullptr) {
+                LOGIFACE_LOG(warn, "Game::FrameRender: camera is null, skipping");
+                return;
+            }
+            if (!scene_valid_) {
+                LOGIFACE_LOG(debug, "Game::FrameRender: scene_valid_ is false, skipping");
+                return;
+            }
+            ctx_.renderer->RenderFrame(*fctx.App().bootstrap,
+                                       ctx_.component_registry,
+                                       *camera,
+                                       *ctx_.technique_mgr,
+                                       *ctx_.bindless_mgr,
+                                       *ctx_.scene_renderer,
+                                       ctx_.imgui_system.get(),
+                                       fctx.App().frame.image_index,
+                                       ctx_.texture_uploader.get()
+#ifdef VKENGINE_PHYSICAL_CAMERA
+                                       , ctx_.physical_camera.get()
+#endif
+                                       );
+        },
+        "frame.render_submit");
+}
+
 GameEngine::~GameEngine() {
     if (initialized_) {
         Shutdown();
@@ -218,6 +428,11 @@ bool GameEngine::Setup(VulkanEngine::Application::ApplicationContext& ctx, const
             });
     }
 #endif
+
+    // Seed the rendered-frame phase schedule with the engine's own frame
+    // systems — the calls the direct path made, now registrable surface. A
+    // game extends this with AddFrameSystemAfter/Before; see FrameSchedule.
+    RegisterFramePipeline();
 
     initialized_ = true;
     return true;
@@ -758,40 +973,16 @@ void GameEngine::FixedUpdate(const VulkanEngine::Application::ApplicationContext
 }
 
 void GameEngine::FrameUpdate(const VulkanEngine::Application::ApplicationContext& ctx) {
-    // Screen text is authored in logical points while the overlay pass and the glyph
-    // rasterizer are in physical pixels, so the ratio between them is pushed here: once
-    // per frame, before any hook that submits text, and deliberately before the early
-    // returns below, because a frame with no valid scene still draws its UI. The platform
-    // owns the value; the text system does not read a window it does not own.
-    if (ctx_.text_system != nullptr && ctx.platform_state != nullptr) {
-        ctx_.text_system->SetDisplayScale(ctx.platform_state->content_scale);
-    }
-
-    if (!ctx_.mesh_manager) {
-        LOGIFACE_LOG(warn, "Game::FrameUpdate: mesh_manager is null, skipping ProcessFrame");
-        return;
-    }
-    if (!scene_valid_) {
-        LOGIFACE_LOG(warn, "Game::FrameUpdate: scene_valid_ is false, skipping ProcessFrame");
-        return;
-    }
-
-    {
-        // Index every engine FIF ring (dynamic mesh uploads, per-frame descriptors,
-        // frame block arrays) with the monotonic frame counter modulo the pipeline
-        // depth. Image indices must never drive FIF slot selection.
-        const std::uint32_t fif = ctx.bootstrap->GetBackend().GetFramesInFlight();
-        const std::uint32_t frame_index = ctx.frame.frame_counter % fif;
-        ctx_.mesh_render_system.ProcessFrame(
-            ctx_.component_registry,
-            ctx_.mesh_registry,
-            *ctx_.mesh_manager,
-            *ctx_.scene_renderer,
-            ctx_.vertex_heap,
-            ctx_.index_heap,
-            ctx_.material_mgr,
-            frame_index);
-    }
+    // The bridge phase, once per rendered frame: the display-scale push (which
+    // runs even when no valid scene exists, so a scene-less frame still draws
+    // its UI) and the per-frame mesh/render processing. The systems own their
+    // own gating; see RegisterFramePipeline for each block's checks.
+    //
+    // The frame's systems mutate application-side frame state (the hook surface
+    // hands the same non-const context), so the const-ref public signature is
+    // unwrapped here; this is the one place the frame schedule meets a loop.
+    FramePhaseContext fctx{&const_cast<Application::ApplicationContext&>(ctx), &ctx_};
+    frames_.Run(FramePhase::Bridge, fctx);
 }
 
 void GameEngine::FrameRender(const VulkanEngine::Application::ApplicationContext& ctx) {
@@ -799,8 +990,7 @@ void GameEngine::FrameRender(const VulkanEngine::Application::ApplicationContext
         LOGIFACE_LOG(warn, "Game::FrameRender: renderer is null, skipping");
         return;
     }
-    Components::Camera* const camera = GetCamera();
-    if (camera == nullptr) {
+    if (GetCamera() == nullptr) {
         LOGIFACE_LOG(warn, "Game::FrameRender: camera is null, skipping");
         return;
     }
@@ -809,89 +999,13 @@ void GameEngine::FrameRender(const VulkanEngine::Application::ApplicationContext
         return;
     }
 
-    if (ctx_.mesh_manager) {
-        const std::uint32_t fif = ctx.bootstrap->GetBackend().GetFramesInFlight();
-        ctx_.mesh_manager->EndFrame(ctx.frame.frame_counter % fif);
-    }
-
-    // Pump finished async uploads into staged images before the frame records.
-    if (ctx_.texture_uploader) {
-        ctx_.texture_uploader->BeginFrame(
-            ctx.frame.frame_counter,
-            [&ctx](std::uint32_t recording_frame) {
-                return ctx.bootstrap->IsFrameComplete(recording_frame);
-            });
-    }
-
-    // Drain deferred bindless descriptor ops (uploads published, released slots
-    // returned to the free list, retired bindings destroyed). This runs after
-    // AcquireNextImage has waited the ring's in-flight fence for this slot, so
-    // any op from `frame_counter - FIF` is GPU-safe. A gated publish applies
-    // only when its recording frame was actually submitted.
-    ctx_.bindless_mgr->BeginFrame(
-        ctx.frame.frame_counter,
-        [&ctx](std::uint32_t recording_frame) {
-            return ctx.bootstrap->IsFrameComplete(recording_frame);
-        },
-        [](BindlessManager::TextureHandle handle, std::uint32_t /*frame*/) {
-            LOGIFACE_LOG(warn, "BindlessManager: dropped a publish for slot " +
-                                   std::to_string(handle.slot) + " (recording frame not submitted)");
-        });
-
-#ifdef VKENGINE_HOT_RELOAD
-    // Texture hot reload: apply completed slot swaps and reload changed files.
-    // Runs after the bindless drain so a published new binding is visible, and
-    // before materials flush so the rewritten slots reach the GPU this frame.
-    if (ctx_.texture_reloader) {
-        (void)ctx_.texture_reloader->Pump(ctx.frame.frame_counter);
-    }
-    // Font hot reload is pumped exactly alongside it: the same point in the
-    // frame, after the bindless drain so a page retired by a reload is applied
-    // at the right ring, and before the pass records so the reload is visible to
-    // the frame being built.
-    if (ctx_.font_reloader) {
-        (void)ctx_.font_reloader->Pump(ctx.frame.frame_counter);
-    }
-#endif
-
-    // Whole-texture residency: evict least-recently-used textures when the
-    // resident set exceeds the device memory budget. Inert when no budget is
-    // available. Eviction goes through the deferred bindless release, so a
-    // slot's descriptor is reset to the fallback at the ring drain and no
-    // in-flight frame samples a destroyed image.
-    if (ctx_.texture_residency && ctx_.texture_residency->IsEnabled()) {
-        const std::uint32_t residency_fif = ctx.bootstrap->GetBackend().GetFramesInFlight();
-        (void)ctx_.texture_residency->Collect(ctx.frame.frame_counter,
-                                              /*min_residency_frames=*/residency_fif);
-    }
-
-    // Flush dirty material data to GPU before rendering
-    ctx_.material_mgr.FlushDirtyMaterials();
-
-    // Rebuild technique pipelines whose shaders changed (hot reload)
-    const auto frame_index = ctx.bootstrap->GetSnapshot().frame_index;
-    ctx_.technique_mgr->PollShaders(*ctx_.shader_manager, *ctx_.pipeline_factory,
-                                    frame_index);
-
-#ifdef VKENGINE_PHYSICAL_CAMERA
-    if (ctx_.physical_camera) {
-        ctx_.physical_camera->PollShaders(frame_index);
-    }
-#endif
-
-    ctx_.renderer->RenderFrame(*ctx.bootstrap,
-                               ctx_.component_registry,
-                               *camera,
-                               *ctx_.technique_mgr,
-                               *ctx_.bindless_mgr,
-                               *ctx_.scene_renderer,
-                               ctx_.imgui_system.get(),
-                               ctx.frame.image_index,
-                               ctx_.texture_uploader.get()
-#ifdef VKENGINE_PHYSICAL_CAMERA
-                               , ctx_.physical_camera.get()
-#endif
-                               );
+    // Pre-record drains/flushes, then render submission, then post-present
+    // work — the phases in their fixed order, each running its resolved
+    // member sequence.
+    FramePhaseContext fctx{&const_cast<Application::ApplicationContext&>(ctx), &ctx_};
+    frames_.Run(FramePhase::PreRecord, fctx);
+    frames_.Run(FramePhase::Record, fctx);
+    frames_.Run(FramePhase::PostPresent, fctx);
 }
 
 void GameEngine::Shutdown() {

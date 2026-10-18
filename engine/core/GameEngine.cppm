@@ -28,6 +28,7 @@ export import VulkanEngine.Application;
 export import VulkanEngine.Input;
 export import VulkanEngine.EngineContext;
 export import VulkanEngine.ECS.SystemSchedule;
+export import VulkanEngine.ECS.FrameSchedule;
 export import VulkanEngine.Text.TextSystem;
 export import VulkanEngine.Text.Font;
 
@@ -166,9 +167,49 @@ public:
         return systems_.AddBefore(before, slot, std::move(fn), label);
     }
     void FixedUpdate(const VulkanEngine::Application::ApplicationContext& ctx);
+
+    // ── Frame phases ──
+    // The per-rendered-frame pipeline is a named-phase schedule (FrameSchedule),
+    // the same seam the fixed step uses: every hardcoded frame call is an
+    // engine-registered system, and a game adds its own per-frame work with
+    // identity-based constraints — never an edit to the pipeline. With nothing
+    // extra registered, this emits exactly the calls the direct path made.
+    //
+    // Constraints are by identity (FrameSlot enumerators for the engine's own
+    // systems, opaque FrameId handles otherwise); labels are diagnostics only
+    // and must be string literals. A new system joins the phase of the system
+    // it constrains against, or the phase passed to AddFrameSystem.
+    using FrameFn = FrameSchedule::FrameFn;
+    FrameId AddFrameSystem(FramePhase phase, FrameFn fn,
+                           std::string_view label = {}) {
+        return frames_.Add(phase, std::move(fn), label);
+    }
+    FrameId AddFrameSystem(FramePhase phase, FrameSlot slot, FrameFn fn,
+                           std::string_view label = {}) {
+        return frames_.Add(phase, slot, std::move(fn), label);
+    }
+    FrameId AddFrameSystemAfter(FrameRef after, FrameFn fn, std::string_view label = {}) {
+        return frames_.AddAfter(after, std::move(fn), label);
+    }
+    FrameId AddFrameSystemAfter(FrameRef after, FrameSlot slot, FrameFn fn,
+                                std::string_view label = {}) {
+        return frames_.AddAfter(after, slot, std::move(fn), label);
+    }
+    FrameId AddFrameSystemBefore(FrameRef before, FrameFn fn, std::string_view label = {}) {
+        return frames_.AddBefore(before, std::move(fn), label);
+    }
+    FrameId AddFrameSystemBefore(FrameRef before, FrameSlot slot, FrameFn fn,
+                                 std::string_view label = {}) {
+        return frames_.AddBefore(before, slot, std::move(fn), label);
+    }
+    // Direct access for a composed game that wants to inspect or seed a phase
+    // (e.g. enumerate the engine's registered frame systems).
+    FrameSchedule& FrameSystems() { return frames_; }
+
     // Everything that must happen exactly once per rendered frame: the text
     // display scale and the per-frame mesh/render processing (which indexes the
     // in-flight rings by frame counter, so it must not run per simulation step).
+    // Runs the FramePhase::Bridge schedule.
     void FrameUpdate(const VulkanEngine::Application::ApplicationContext& ctx);
     void FrameRender(const VulkanEngine::Application::ApplicationContext& ctx);
     void Shutdown();
@@ -227,6 +268,10 @@ public:
     const EngineContext& GetContext() const { return ctx_; }
 
 private:
+    // The rendered-frame pipeline, seeded by the engine: every call the direct
+    // path made, registered into a FrameSchedule phase (see FrameSchedule).
+    void RegisterFramePipeline();
+
     EngineContext ctx_;
     EngineBootstrap bootstrap_;
 
@@ -243,6 +288,10 @@ private:
 
     // Data-component systems, in registration order (see AddSystem).
     VulkanEngine::SystemSchedule systems_{};
+
+    // Rendered-frame phase systems, in phase + registration order
+    // (see AddFrameSystem).
+    FrameSchedule frames_{};
 
     std::uint16_t main_technique_id_ = 0;
     std::uint16_t main_draw_group_ = 0;
