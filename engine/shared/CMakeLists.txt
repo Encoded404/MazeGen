@@ -28,6 +28,7 @@ if(CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
             Jobs.cppm
             ScopedTimer.cppm
             Storage.cppm
+            SystemProfile.cppm
             Teardown.cppm
             Timer.cppm
             UserPaths.cppm

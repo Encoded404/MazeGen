@@ -1149,7 +1149,7 @@ void GameEngine::FixedUpdate(const VulkanEngine::Application::ApplicationContext
     // disabled. This runs on the on_fixed_update hook, so it may execute more
     // than once per rendered frame; nothing here may touch per-frame render state.
     ctx_.component_registry.ApplyStructuralChanges();
-    systems_.Run(ctx_.component_registry, ctx.frame.fixed_delta_time);
+    systems_.Run(ctx_.component_registry, ctx.frame.fixed_delta_time, ctx.system_profile_sink);
     ctx_.component_registry.UpdateAllComponentsAsync(ctx.frame.fixed_delta_time,
                                                      component_context_);
     ctx_.component_registry.ApplyStructuralChanges();
@@ -1165,7 +1165,7 @@ void GameEngine::FrameUpdate(const VulkanEngine::Application::ApplicationContext
     // hands the same non-const context), so the const-ref public signature is
     // unwrapped here; this is the one place the frame schedule meets a loop.
     FramePhaseContext fctx{&const_cast<Application::ApplicationContext&>(ctx), &ctx_};
-    frames_.Run(FramePhase::Bridge, fctx);
+    frames_.Run(FramePhase::Bridge, fctx, ctx.system_profile_sink);
 }
 
 void GameEngine::FrameRender(const VulkanEngine::Application::ApplicationContext& ctx) {
@@ -1186,9 +1186,9 @@ void GameEngine::FrameRender(const VulkanEngine::Application::ApplicationContext
     // work — the phases in their fixed order, each running its resolved
     // member sequence.
     FramePhaseContext fctx{&const_cast<Application::ApplicationContext&>(ctx), &ctx_};
-    frames_.Run(FramePhase::PreRecord, fctx);
-    frames_.Run(FramePhase::Record, fctx);
-    frames_.Run(FramePhase::PostPresent, fctx);
+    frames_.Run(FramePhase::PreRecord, fctx, ctx.system_profile_sink);
+    frames_.Run(FramePhase::Record, fctx, ctx.system_profile_sink);
+    frames_.Run(FramePhase::PostPresent, fctx, ctx.system_profile_sink);
 }
 
 void GameEngine::Shutdown() {

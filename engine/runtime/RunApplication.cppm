@@ -19,6 +19,7 @@ import VulkanBackend.Vulkan.FrameLoop;
 import VulkanShared.CallbackList;
 import VulkanShared.ScopedSection;
 import VulkanShared.Storage;
+import VulkanShared.SystemProfile;
 import VulkanShared.Timer;
 import VulkanShared.UserPaths;
 import VulkanEngine.Input;
@@ -27,6 +28,7 @@ import VulkanBackend.Vulkan.VulkanBootstrapBackend;
 import VulkanEngine.Startup;
 import VulkanEngine.Application;
 import Runtime.FrameStepClock;
+import Runtime.FrameProfiler;
 
 #ifndef UINT32_MAX
 constexpr std::uint32_t UINT32_MAX =
@@ -58,6 +60,12 @@ export namespace VulkanEngine::Application {
     struct PendingPresent { std::uint32_t frame_counter; std::uint32_t image_index; };
     std::vector<PendingPresent> pending_presents{};
     const bool discard_stale = config.present_policy == PresentPolicy::DiscardStale;
+
+    // Wall-clock frame profiling. Off unless the config asks for it, in which
+    // case every stage of the loop below is timed and each frame that ran long is
+    // charged to the stage that dominated it. This is the only way to see time
+    // the loop spends *blocked* -- fences, acquires, presents, or the scheduler.
+    Runtime::FrameProfiler frame_profiler{};
 
     auto cleanup = [&]() {
         VulkanEngine::Crash::Stage("shutdown");
@@ -117,6 +125,17 @@ export namespace VulkanEngine::Application {
         double startup_prev = 0.0;
         VulkanEngine::Startup::InitializeLogger(config.log_level);
         LOGIFACE_LOG(info, config.app_name + " started");
+
+        if (config.frame_profile) {
+            Runtime::FrameProfileConfig profile_config{};
+            profile_config.long_frame_ms = config.frame_profile_long_ms;
+            profile_config.log_every = std::max<std::uint64_t>(config.frame_profile_every, 1);
+            frame_profiler.Configure(profile_config);
+            LOGIFACE_LOG(info, "frame profiling on (long frame >= " +
+                                   std::to_string(config.frame_profile_long_ms) +
+                                   " ms, summary every " +
+                                   std::to_string(profile_config.log_every) + " iterations)");
+        }
 
         // ── Per-user storage ───────────────────────────────────────────────
         // Resolved before the platform and the device, so a saved setting can
@@ -276,6 +295,7 @@ export namespace VulkanEngine::Application {
         context.platform_state = &platform->GetState();
         context.geometry_buffer_size_mb = config.geometry_buffer_size_mb;
         context.draw_mode = config.draw_mode;
+        context.system_profile_sink = frame_profiler.Enabled() ? &frame_profiler : nullptr;
 
         VulkanEngine::Crash::Stage("app setup");
         if (!hooks.on_setup.Call(context)) {
@@ -302,6 +322,10 @@ export namespace VulkanEngine::Application {
         LOGIFACE_LOG(info, "startup: total " + std::to_string(startup.ElapsedMs()) + " ms");
         VulkanEngine::Crash::Stage("frame loop");
         while (!platform->ShouldQuit() && !runtime->ShouldShutdown()) {
+            // First statement of the iteration: closes the interval that just
+            // ended, so it covers poll, input, acquire and present too.
+            frame_profiler.BeginIteration();
+
             // Sampled once at the top of the iteration, ahead of every path that can
             // `continue` (minimized, swapchain recreation, acquire failure). Those
             // paths used to return before the sample, so the entire stall they
@@ -314,47 +338,65 @@ export namespace VulkanEngine::Application {
             const float raw_delta_time = std::chrono::duration<float>(now - previous_time).count();
             previous_time = now;
 
-            auto platform_events = platform->PollEvents();
+            VulkanBackend::Event::EventList platform_events;
+            {
+                const Runtime::FrameStageScope stage_scope{
+                    frame_profiler, Runtime::FrameStage::PollEvents};
+                platform_events = platform->PollEvents();
+            }
 
-            hooks.on_pre_input.Call(context);
+            {
+                const Runtime::FrameStageScope stage_scope{
+                    frame_profiler, Runtime::FrameStage::PreInput};
+                hooks.on_pre_input.Call(context);
+            }
 
-            bool filter_mouse = hooks.should_filter_mouse_input && hooks.should_filter_mouse_input();
-            bool filter_keyboard = hooks.should_filter_keyboard_input && hooks.should_filter_keyboard_input();
+            {
+                const Runtime::FrameStageScope stage_scope{
+                    frame_profiler, Runtime::FrameStage::InputProcess};
+                bool filter_mouse = hooks.should_filter_mouse_input && hooks.should_filter_mouse_input();
+                bool filter_keyboard = hooks.should_filter_keyboard_input && hooks.should_filter_keyboard_input();
 
-            VulkanBackend::Event::EventList filtered_events;
-            filtered_events.reserve(platform_events.size());
+                VulkanBackend::Event::EventList filtered_events;
+                filtered_events.reserve(platform_events.size());
 
-            for (auto& event : platform_events) {
-                const auto etype = event->GetEventType();
-                bool is_mouse = etype == VulkanBackend::Event::EventType::MouseButtonDown ||
-                                etype == VulkanBackend::Event::EventType::MouseButtonUp ||
-                                etype == VulkanBackend::Event::EventType::MouseMotion ||
-                                etype == VulkanBackend::Event::EventType::MouseWheel;
+                for (auto& event : platform_events) {
+                    const auto etype = event->GetEventType();
+                    bool is_mouse = etype == VulkanBackend::Event::EventType::MouseButtonDown ||
+                                    etype == VulkanBackend::Event::EventType::MouseButtonUp ||
+                                    etype == VulkanBackend::Event::EventType::MouseMotion ||
+                                    etype == VulkanBackend::Event::EventType::MouseWheel;
 
-                bool is_keyboard = etype == VulkanBackend::Event::EventType::KeyDown ||
-                                   etype == VulkanBackend::Event::EventType::KeyUp;
+                    bool is_keyboard = etype == VulkanBackend::Event::EventType::KeyDown ||
+                                       etype == VulkanBackend::Event::EventType::KeyUp;
 
-                if (is_mouse && filter_mouse) {
-                    continue;
+                    if (is_mouse && filter_mouse) {
+                        continue;
+                    }
+                    if (is_keyboard && filter_keyboard) {
+                        continue;
+                    }
+                    filtered_events.push_back(std::move(event));
                 }
-                if (is_keyboard && filter_keyboard) {
-                    continue;
+
+                input_system.ProcessEvents(filtered_events);
+                if (context.quit_action_handle.id != UINT32_MAX && input_system.WasActionStarted(context.quit_action_handle)) {
+                    runtime->RequestShutdown();
                 }
-                filtered_events.push_back(std::move(event));
+
+                context.platform_state = &platform->GetState();
+                if (context.platform_state->quit_requested) {
+                    runtime->RequestShutdown();
+                }
+
+                runtime->NotifyWindowMinimized(context.platform_state->minimized);
             }
 
-            input_system.ProcessEvents(filtered_events);
-            if (context.quit_action_handle.id != UINT32_MAX && input_system.WasActionStarted(context.quit_action_handle)) {
-                runtime->RequestShutdown();
+            {
+                const Runtime::FrameStageScope stage_scope{
+                    frame_profiler, Runtime::FrameStage::RuntimeBegin};
+                context.frame.runtime_frame = runtime->BeginFrame();
             }
-
-            context.platform_state = &platform->GetState();
-            if (context.platform_state->quit_requested) {
-                runtime->RequestShutdown();
-            }
-
-            runtime->NotifyWindowMinimized(context.platform_state->minimized);
-            context.frame.runtime_frame = runtime->BeginFrame();
             if (context.frame.runtime_frame.status == VulkanBackend::Vulkan::RuntimeStatus::Minimized ||
                 context.frame.runtime_frame.status == VulkanBackend::Vulkan::RuntimeStatus::ShutdownRequested) {
                 std::this_thread::sleep_for(std::chrono::milliseconds(config.minimized_sleep_ms));
@@ -369,6 +411,11 @@ export namespace VulkanEngine::Application {
             // are issued in submission order; the Mailbox compositor then scans out
             // the freshest completed frame and drops the stale ones.
             if (discard_stale) {
+                // Deferred presents and their fence checks happen here, not in
+                // the sequential Present scope; name the stage explicitly so a
+                // blocked present does not disappear into `unaccounted`.
+                const Runtime::FrameStageScope stage_scope{
+                    frame_profiler, Runtime::FrameStage::PresentDrain};
                 while (!pending_presents.empty()) {
                     PendingPresent& front = pending_presents.front();
                     // The front frame's slot fence reflects exactly its own work: no
@@ -382,18 +429,33 @@ export namespace VulkanEngine::Application {
                         bootstrap->NotifySwapchainOutOfDate();
                         break;
                     }
+                    frame_profiler.NotePresent();
                     pending_presents.erase(pending_presents.begin());
                 }
             }
 
-            const auto bootstrap_frame = bootstrap->BeginFrame();
+            VulkanBackend::Vulkan::VulkanBootstrapState bootstrap_frame{};
+            {
+                const Runtime::FrameStageScope stage_scope{
+                    frame_profiler, Runtime::FrameStage::BootstrapBegin};
+                bootstrap_frame = bootstrap->BeginFrame();
+            }
             if (bootstrap_frame.status == VulkanBackend::Vulkan::BootstrapStatus::SwapchainOutOfDate) {
-                if (!bootstrap->RecreateSwapchain()) {
+                bool recreated = false;
+                {
+                    const Runtime::FrameStageScope stage_scope{
+                        frame_profiler, Runtime::FrameStage::SwapchainRecreate};
+                    recreated = bootstrap->RecreateSwapchain();
+                }
+                if (!recreated) {
                     return fail("Swapchain recreation failed");
                 }
                 // Recreation is unbounded work performed after this iteration's
                 // sample; re-stamp the clock so it is billed to no frame at all.
+                // The profiler must agree, or the one-off stall lands in the next
+                // interval and is blamed on whatever happens then.
                 previous_time = std::chrono::steady_clock::now();
+                frame_profiler.DiscardNextInterval();
                 continue;
             }
             if (bootstrap_frame.status != VulkanBackend::Vulkan::BootstrapStatus::Ok) {
@@ -401,7 +463,13 @@ export namespace VulkanEngine::Application {
             }
 
             context.frame.image_index = 0;
-            if (!bootstrap->AcquireNextImage(context.frame.image_index)) {
+            bool acquired = false;
+            {
+                const Runtime::FrameStageScope stage_scope{
+                    frame_profiler, Runtime::FrameStage::Acquire};
+                acquired = bootstrap->AcquireNextImage(context.frame.image_index);
+            }
+            if (!acquired) {
                 bootstrap->NotifySwapchainOutOfDate();
                 continue;
             }
@@ -423,37 +491,68 @@ export namespace VulkanEngine::Application {
 
             context.frame.frame_counter = bootstrap->GetSnapshot().frame_index;
 
-            for (std::uint32_t step = 0; step < tick.step_count; ++step) {
-                hooks.on_fixed_update.Call(context);
-                if (runtime->ShouldShutdown()) {
-                    // Do not simulate further once a step has asked to quit.
-                    break;
+            {
+                const Runtime::FrameStageScope stage_scope{
+                    frame_profiler, Runtime::FrameStage::AppUpdate};
+                for (std::uint32_t step = 0; step < tick.step_count; ++step) {
+                    hooks.on_fixed_update.Call(context);
+                    if (runtime->ShouldShutdown()) {
+                        // Do not simulate further once a step has asked to quit.
+                        break;
+                    }
                 }
+
+                hooks.on_frame_update.Call(context);
             }
 
-            hooks.on_frame_update.Call(context);
-
             context.frame.render_success = true;
-            hooks.on_frame_render.Call(context);
+            {
+                const Runtime::FrameStageScope stage_scope{
+                    frame_profiler, Runtime::FrameStage::AppRender};
+                hooks.on_frame_render.Call(context);
+            }
 
             if (discard_stale) {
                 // Submit now, present later (once the GPU work completes — see the
                 // drain at the top of the loop). Frames whose present is superseded
                 // are dropped by the Mailbox compositor; every image is still
                 // presented exactly once, so none leaks.
-                if (!bootstrap->SubmitFrame(context.frame.image_index,
-                                            context.frame.render_success)) {
+                bool submitted = false;
+                {
+                    const Runtime::FrameStageScope stage_scope{
+                        frame_profiler, Runtime::FrameStage::Submit};
+                    submitted = bootstrap->SubmitFrame(context.frame.image_index,
+                                                       context.frame.render_success);
+                }
+                if (!submitted) {
                     bootstrap->NotifySwapchainOutOfDate();
                 } else if (context.frame.render_success) {
                     pending_presents.push_back(
                         {context.frame.frame_counter, context.frame.image_index});
                 }
-            } else if (!bootstrap->SubmitFrame(context.frame.image_index,
-                                               context.frame.render_success)) {
-                bootstrap->NotifySwapchainOutOfDate();
-            } else if (context.frame.render_success &&
-                       !bootstrap->Present(context.frame.image_index)) {
-                bootstrap->NotifySwapchainOutOfDate();
+            } else {
+                bool submitted = false;
+                {
+                    const Runtime::FrameStageScope stage_scope{
+                        frame_profiler, Runtime::FrameStage::Submit};
+                    submitted = bootstrap->SubmitFrame(context.frame.image_index,
+                                                       context.frame.render_success);
+                }
+                if (!submitted) {
+                    bootstrap->NotifySwapchainOutOfDate();
+                } else if (context.frame.render_success) {
+                    bool presented = false;
+                    {
+                        const Runtime::FrameStageScope stage_scope{
+                            frame_profiler, Runtime::FrameStage::Present};
+                        presented = bootstrap->Present(context.frame.image_index);
+                    }
+                    if (presented) {
+                        frame_profiler.NotePresent();
+                    } else {
+                        bootstrap->NotifySwapchainOutOfDate();
+                    }
+                }
             }
 
             ++rendered_frames;
@@ -467,8 +566,37 @@ export namespace VulkanEngine::Application {
                 runtime->RequestShutdown();
             }
 
-            runtime->EndFrame();
-            bootstrap->EndFrame();
+            {
+                const Runtime::FrameStageScope stage_scope{
+                    frame_profiler, Runtime::FrameStage::RuntimeEnd};
+                runtime->EndFrame();
+            }
+            {
+                const Runtime::FrameStageScope stage_scope{
+                    frame_profiler, Runtime::FrameStage::BootstrapEnd};
+                bootstrap->EndFrame();
+            }
+
+            frame_profiler.EndIteration();
+            if (frame_profiler.TakeSummaryDue()) {
+                // The summary write is synchronous and slow enough to look like a
+                // stutter of its own, so the interval that contains it is dropped
+                // rather than measured: the instrument does not appear in its own
+                // numbers.
+                frame_profiler.DiscardNextInterval();
+                LOGIFACE_LOG(info, frame_profiler.Summary());
+                // Start the next window clean, so consecutive summaries describe
+                // disjoint spans rather than re-reporting the whole run.
+                frame_profiler.ResetWindow();
+            }
+        }
+
+        // A run shorter than the summary cadence still gets its window: without
+        // this, `--frame-profile --max-frames 600` (the default cadence) would
+        // print only the banner. HasSamples() covers a one-iteration run too,
+        // which records stage time but no closed interval.
+        if (frame_profiler.Enabled() && frame_profiler.HasSamples()) {
+            LOGIFACE_LOG(info, frame_profiler.Summary());
         }
 
         cleanup();

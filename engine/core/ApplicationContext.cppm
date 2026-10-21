@@ -15,6 +15,7 @@ import VulkanBackend.Platform.SdlPlatform;
 import VulkanBackend.Vulkan.FrameLoop;
 import VulkanShared.CallbackList;
 import VulkanShared.Storage;
+import VulkanShared.SystemProfile;
 import VulkanEngine.Input;
 import VulkanBackend.Vulkan.VulkanBootstrap;
 export import VulkanEngine.DrawMode;
@@ -81,6 +82,9 @@ struct ApplicationContext {
     // GameConfig::draw_mode untouched. A set value replaces it before the
     // SceneRenderer resolves it against device capabilities.
     std::optional<SceneRenderer::DrawMode> draw_mode{}; // NOLINT(misc-non-private-member-variables-in-classes)
+    // Per-ECS-system CPU profiler sink (Runtime::FrameProfiler implements it).
+    // Set by RunApplication before on_setup; null means the schedules read no clock.
+    VulkanShared::ISystemProfileSink* system_profile_sink = nullptr; // NOLINT(misc-non-private-member-variables-in-classes)
 };
 
 struct ApplicationConfig {
@@ -136,6 +140,10 @@ struct ApplicationConfig {
     // Exit cleanly after this many submitted frames. 0 = run until the user
     // quits. Used by automated smoke runs (`--max-frames`).
     std::uint32_t max_frames = 0; // NOLINT(misc-non-private-member-variables-in-classes)
+    // --frame-profile: wall-clock loop profiling. Off = zero clock reads.
+    bool frame_profile = false; // NOLINT(misc-non-private-member-variables-in-classes)
+    double frame_profile_long_ms = 20.0; // NOLINT(misc-non-private-member-variables-in-classes)
+    std::uint64_t frame_profile_every = 600; // NOLINT(misc-non-private-member-variables-in-classes)
     std::uint64_t geometry_buffer_size_mb = 128; // NOLINT(misc-non-private-member-variables-in-classes)
     // Draw-mode override from --overwrite draw.mode, or unset. RunApplication
     // copies it into ApplicationContext, where GameEngine::Setup applies it.

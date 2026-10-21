@@ -41,6 +41,16 @@ Cli::Cli(std::string_view app_name, std::string_view org_id, std::string_view ap
                     "Exit cleanly after this many rendered frames (0 = run until quit)")
        ->type_name("N");
 
+    app_.add_flag("--frame-profile", frame_profile_,
+                  "Profile the frame loop's wall-clock interval and attribute long frames to the "
+                  "stage that dominated them");
+    app_.add_option("--frame-profile-long-ms", frame_profile_long_ms_,
+                    "Interval at or above which a frame counts as long (ms)")
+       ->type_name("MS");
+    app_.add_option("--frame-profile-every", frame_profile_every_,
+                    "Iterations between frame profile summaries")
+       ->type_name("N");
+
     // Simulation cadence. 0 keeps the variable-step loop, which is the default:
     // on_fixed_update then runs once per frame carrying the variable delta.
     app_.add_option("--fixed-timestep", fixed_timestep_hz_,
@@ -116,6 +126,9 @@ VulkanEngine::Application::ApplicationConfig Cli::MakeConfig() const {
     config.disable_portable = DisablePortable();
     config.log_level = log_level_;
     config.max_frames = max_frames_;
+    config.frame_profile = frame_profile_;
+    config.frame_profile_long_ms = frame_profile_long_ms_;
+    config.frame_profile_every = frame_profile_every_;
     // Hz at the CLI, seconds in the config: the loop integrates seconds.
     config.fixed_timestep =
         fixed_timestep_hz_ > 0.0 ? static_cast<float>(1.0 / fixed_timestep_hz_) : 0.0f;

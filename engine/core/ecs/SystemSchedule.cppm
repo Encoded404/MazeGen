@@ -24,6 +24,8 @@ export module VulkanEngine.ECS.SystemSchedule;
 
 import std;
 
+import VulkanShared.SystemProfile;
+
 export import VulkanEngine.ECS.ComponentRegistry;
 
 export namespace VulkanEngine {
@@ -144,9 +146,27 @@ public:
         return Register(std::move(fn), slot, label, before, true);
     }
 
-    void Run(ComponentRegistry& registry, float delta_time) const {
+    /// Run every system in its resolved order. A non-null `profile` receives one
+    /// timing per executed system; a null one keeps the original fast path.
+    void Run(ComponentRegistry& registry, float delta_time,
+             VulkanShared::ISystemProfileSink* profile = nullptr) const {
+        if (profile == nullptr) {
+            for (const std::uint16_t index : order_) {
+                entries_[index].fn(registry, delta_time);
+            }
+            return;
+        }
         for (const std::uint16_t index : order_) {
+            // Resolve the label before the clock starts, so name lookup is not
+            // included in the measurement and evaluation order cannot matter.
+            const std::string label = Describe(index);
+            const auto start = std::chrono::steady_clock::now();
             entries_[index].fn(registry, delta_time);
+            const double elapsed_ms = std::chrono::duration<double, std::milli>(
+                                          std::chrono::steady_clock::now() - start)
+                                          .count();
+            profile->AddSystemTiming(VulkanShared::SystemProfileKind::Component, label,
+                                     elapsed_ms);
         }
     }
 

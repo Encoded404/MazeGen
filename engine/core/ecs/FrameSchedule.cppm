@@ -42,6 +42,7 @@ import std;
 
 import VulkanEngine.Application;
 import VulkanEngine.EngineContext;
+import VulkanShared.SystemProfile;
 
 export namespace VulkanEngine {
 
@@ -224,12 +225,31 @@ public:
     }
 
     /// Run one phase's systems in its resolved order. Phases with no systems
-    /// cost nothing.
-    void Run(FramePhase phase, FramePhaseContext& fctx) const {
-        for (const std::uint16_t index : order_) {
-            if (entries_[index].phase == phase) {
-                entries_[index].fn(fctx);
+    /// cost nothing. A non-null `profile` receives one timing per executed
+    /// system; a null one keeps the original branch-free fast path.
+    void Run(FramePhase phase, FramePhaseContext& fctx,
+             VulkanShared::ISystemProfileSink* profile = nullptr) const {
+        if (profile == nullptr) {
+            for (const std::uint16_t index : order_) {
+                if (entries_[index].phase == phase) {
+                    entries_[index].fn(fctx);
+                }
             }
+            return;
+        }
+        for (const std::uint16_t index : order_) {
+            if (entries_[index].phase != phase) {
+                continue;
+            }
+            // Resolve the label before the clock starts, so name lookup is not
+            // included in the measurement and evaluation order cannot matter.
+            const std::string label = Describe(index);
+            const auto start = std::chrono::steady_clock::now();
+            entries_[index].fn(fctx);
+            const double elapsed_ms = std::chrono::duration<double, std::milli>(
+                                          std::chrono::steady_clock::now() - start)
+                                          .count();
+            profile->AddSystemTiming(VulkanShared::SystemProfileKind::Frame, label, elapsed_ms);
         }
     }
 

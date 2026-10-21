@@ -37,6 +37,7 @@ if(CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
             Overrides.cppm
             ExampleCli.cppm
             FrameStepClock.cppm
+            FrameProfiler.cppm
     )
 endif()
 

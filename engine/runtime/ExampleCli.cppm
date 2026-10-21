@@ -71,6 +71,10 @@ private:
     std::string log_level_ = "info";
     std::string user_dir_{};
     std::uint32_t max_frames_ = 0;
+    // Wall-clock frame profiling (--frame-profile et al.).
+    bool frame_profile_ = false;
+    double frame_profile_long_ms_ = 20.0;
+    std::uint64_t frame_profile_every_ = 600;
     // Fixed simulation rate in Hz; 0 keeps the variable-step default.
     double fixed_timestep_hz_ = 0.0;
     bool force_validation_ = false;
