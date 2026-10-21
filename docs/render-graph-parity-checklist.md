@@ -27,6 +27,8 @@ Run the reference scene with validation layers and watch the log:
    frames after a graph mutation).
 8. **Clean shutdown** — no validation errors on teardown; device drains before
    resources are freed.
-9. **GPU counters (optional)** — capture with RenderDoc or a vendor tool: check
-   that barrier counts and layouts did not regress unexpectedly, and that alias
-   reuse actually happens for the resources intended to alias.
+9. **GPU counters (optional)** — first run the built-in per-pass timings
+   (`--gpu-profile`, see [frame and GPU profiling](profiling.md)), then capture
+   with RenderDoc or a vendor tool: check that barrier counts and layouts did
+   not regress unexpectedly, and that alias reuse actually happens for the
+   resources intended to alias.
