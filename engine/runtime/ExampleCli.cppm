@@ -75,6 +75,9 @@ private:
     bool frame_profile_ = false;
     double frame_profile_long_ms_ = 20.0;
     std::uint64_t frame_profile_every_ = 600;
+    // Per-pass GPU timestamps (--gpu-profile et al.).
+    bool gpu_profile_ = false;
+    std::uint64_t gpu_profile_every_ = 240;
     // Fixed simulation rate in Hz; 0 keeps the variable-step default.
     double fixed_timestep_hz_ = 0.0;
     bool force_validation_ = false;

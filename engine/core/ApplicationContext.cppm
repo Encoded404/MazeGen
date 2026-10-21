@@ -85,6 +85,10 @@ struct ApplicationContext {
     // Per-ECS-system CPU profiler sink (Runtime::FrameProfiler implements it).
     // Set by RunApplication before on_setup; null means the schedules read no clock.
     VulkanShared::ISystemProfileSink* system_profile_sink = nullptr; // NOLINT(misc-non-private-member-variables-in-classes)
+    // --gpu-profile override. Unset leaves the game's RendererConfig value alone
+    // (same precedent as draw_mode); set replaces it before renderer init.
+    std::optional<bool> gpu_pass_timing{}; // NOLINT(misc-non-private-member-variables-in-classes)
+    std::uint64_t gpu_pass_timing_every = 0; // NOLINT(misc-non-private-member-variables-in-classes)  // 0 = leave the game's value
 };
 
 struct ApplicationConfig {
@@ -144,6 +148,9 @@ struct ApplicationConfig {
     bool frame_profile = false; // NOLINT(misc-non-private-member-variables-in-classes)
     double frame_profile_long_ms = 20.0; // NOLINT(misc-non-private-member-variables-in-classes)
     std::uint64_t frame_profile_every = 600; // NOLINT(misc-non-private-member-variables-in-classes)
+    // --gpu-profile: per-pass GPU timestamps. Unset = leave the game's value.
+    std::optional<bool> gpu_pass_timing{}; // NOLINT(misc-non-private-member-variables-in-classes)
+    std::uint64_t gpu_pass_timing_every = 0; // NOLINT(misc-non-private-member-variables-in-classes)  // 0 = leave the game's value
     std::uint64_t geometry_buffer_size_mb = 128; // NOLINT(misc-non-private-member-variables-in-classes)
     // Draw-mode override from --overwrite draw.mode, or unset. RunApplication
     // copies it into ApplicationContext, where GameEngine::Setup applies it.

@@ -14,6 +14,7 @@ export import VulkanEngine.PipelinePass;
 import VulkanEngine.GpuResources.TransientAllocator;
 import VulkanEngine.PipelineFactory;
 import VulkanEngine.ShaderManager;
+import VulkanBackend.Vulkan.GpuPassTimer;
 
 export namespace VulkanEngine::RenderPipeline {
 
@@ -139,6 +140,9 @@ public:
     // correct; there is deliberately no single-command-buffer convenience path.
     void BeginFrame(const void* user_data, std::uint32_t image_index, std::uint32_t fif_slot);
     void RecordRun(std::uint32_t run_index, vk::CommandBuffer command_buffer);
+    // Optional per-pass GPU timestamp sink; null (the default) disables timing.
+    // The Renderer owns the timer and outlives the pipeline's use of it.
+    void SetGpuPassTimer(VulkanBackend::Vulkan::GpuPassTimer* timer);
     void EndFrame();
     [[nodiscard]] const VulkanEngine::RenderGraph::QueueRunPlan& GetQueueRuns() const { return queue_runs_; }
 
@@ -202,6 +206,7 @@ private:
     void RollbackPassSetupResources(std::size_t resource_count);
 
     VulkanBackend::Vulkan::VulkanBootstrap* bootstrap_ = nullptr;
+    VulkanBackend::Vulkan::GpuPassTimer* gpu_pass_timer_ = nullptr;
     ShaderSystem::ShaderManager* shader_manager_ = nullptr;
     ShaderSystem::PipelineFactory* pipeline_factory_ = nullptr;
     std::array<vk::DescriptorSetLayout, 5> engine_set_layouts_{};

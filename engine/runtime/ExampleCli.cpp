@@ -50,6 +50,11 @@ Cli::Cli(std::string_view app_name, std::string_view org_id, std::string_view ap
     app_.add_option("--frame-profile-every", frame_profile_every_,
                     "Iterations between frame profile summaries")
        ->type_name("N");
+    app_.add_flag("--gpu-profile", gpu_profile_,
+                  "Bracket every render-graph pass with GPU timestamps and log a per-pass summary");
+    app_.add_option("--gpu-profile-every", gpu_profile_every_,
+                    "Frame renders between per-pass GPU summaries")
+       ->type_name("N");
 
     // Simulation cadence. 0 keeps the variable-step loop, which is the default:
     // on_fixed_update then runs once per frame carrying the variable delta.
@@ -129,6 +134,8 @@ VulkanEngine::Application::ApplicationConfig Cli::MakeConfig() const {
     config.frame_profile = frame_profile_;
     config.frame_profile_long_ms = frame_profile_long_ms_;
     config.frame_profile_every = frame_profile_every_;
+    config.gpu_pass_timing = gpu_profile_ ? std::optional<bool>{true} : std::nullopt;
+    config.gpu_pass_timing_every = gpu_profile_ ? gpu_profile_every_ : 0;
     // Hz at the CLI, seconds in the config: the loop integrates seconds.
     config.fixed_timestep =
         fixed_timestep_hz_ > 0.0 ? static_cast<float>(1.0 / fixed_timestep_hz_) : 0.0f;

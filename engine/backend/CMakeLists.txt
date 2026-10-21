@@ -84,6 +84,7 @@ if(CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
             vulkan/ImageUtils.cppm
             vulkan/PipelineBuilder.cppm
             vulkan/DebugUtils.cppm
+            vulkan/GpuPassTimer.cppm
             vulkan/RenderGraphExecutor.cppm
             imgui/ImGuiVulkanBackend.cppm
     )

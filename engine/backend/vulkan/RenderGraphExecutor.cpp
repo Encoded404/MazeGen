@@ -12,6 +12,7 @@ import logiface;
 import vulkan;
 
 import VulkanShared.RenderGraphTypes;
+import VulkanBackend.Vulkan.GpuPassTimer;
 import VulkanBackend.Vulkan.VulkanDebugUtils;
 
 using VulkanEngine::RenderGraph::BarrierPlan;
@@ -102,7 +103,8 @@ void ExecuteRenderGraphRange(const BarrierPlan& plan,
                              std::uint32_t first_pass,
                              std::uint32_t last_pass,
                              const void* user_data,
-                             vk::CommandBuffer command_buffer) {
+                             vk::CommandBuffer command_buffer,
+                             GpuPassTimer* gpu_pass_timer) {
     if (!graph.success || !plan.valid) {
         return;
     }
@@ -161,8 +163,19 @@ void ExecuteRenderGraphRange(const BarrierPlan& plan,
         }
 
         if (pass.execute.callback) {
+            // Only passes with work are timed; the reserved prep index stays
+            // untimed here because the Renderer writes that pair around its
+            // pre-graph work.
+            const bool timed = gpu_pass_timer != nullptr && gpu_pass_timer->Enabled() &&
+                               pass_index < GpuPassTimer::kPrepPassIndex;
+            if (timed) {
+                gpu_pass_timer->WriteBegin(command_buffer, pass_index, pass.name);
+            }
             LOGIFACE_LOG(trace, std::format("RenderGraphExecutor: executing pass '{}'", pass.name));
             pass.execute.callback(user_data, command_buffer);
+            if (timed) {
+                gpu_pass_timer->WriteEnd(command_buffer, pass_index);
+            }
         }
 
         if (pass.attachment_setup.has_value() && pass.attachment_setup->auto_begin_rendering) {

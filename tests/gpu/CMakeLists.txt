@@ -20,6 +20,7 @@ add_executable(gpu_tests
   text_system_gpu_tests.cpp
   world_text_gpu_tests.cpp
   slug_blob_gpu_tests.cpp
+  gpu_pass_timer_gpu_tests.cpp
 )
 find_package(Ktx CONFIG REQUIRED)
 target_link_libraries(gpu_tests PRIVATE

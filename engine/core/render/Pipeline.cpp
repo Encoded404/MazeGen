@@ -11,6 +11,7 @@ import logiface;
 import vulkan;
 
 import VulkanEngine.RenderGraph;
+import VulkanBackend.Vulkan.GpuPassTimer;
 import VulkanBackend.Vulkan.RenderGraphExecutor;
 import VulkanBackend.Vulkan.VulkanBootstrap;
 import VulkanBackend.Vulkan.VulkanDebugUtils;
@@ -1311,14 +1312,26 @@ void RenderPipeline::BeginFrame(const void* user_data, std::uint32_t image_index
     barrier_plan_ = plan;
 }
 
+void RenderPipeline::SetGpuPassTimer(VulkanBackend::Vulkan::GpuPassTimer* timer) {
+    gpu_pass_timer_ = timer;
+}
+
 void RenderPipeline::RecordRun(std::uint32_t run_index, vk::CommandBuffer command_buffer) {
     if (run_index >= queue_runs_.runs.size()) {
         return;
     }
     const auto& run = queue_runs_.runs[run_index];
+    // Timestamps cannot be written on a queue family without timestamp support,
+    // and a pool cannot span queues: graphics runs get the timer, a separate
+    // compute/transfer run gets null. The pool itself is created on the graphics
+    // family (Renderer::Initialize).
+    const bool async_compute = bootstrap_ != nullptr && bootstrap_->GetBackend().HasAsyncCompute();
+    const bool timestamps_ok =
+        !async_compute || run.queue == VulkanEngine::RenderGraph::QueueType::Graphics;
     VulkanBackend::Vulkan::ExecuteRenderGraphRange(barrier_plan_, compiled_graph_,
                                                    run.first_pass, run.last_pass,
-                                                   &frame_data_, command_buffer);
+                                                   &frame_data_, command_buffer,
+                                                   timestamps_ok ? gpu_pass_timer_ : nullptr);
 }
 
 void RenderPipeline::EndFrame() {

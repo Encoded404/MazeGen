@@ -292,6 +292,15 @@ bool GameEngine::Setup(VulkanEngine::Application::ApplicationContext& ctx, const
     if (ctx.draw_mode.has_value()) {
         config_.draw_mode = *ctx.draw_mode;
     }
+    // The GPU-pass-timing overrides follow the same rule: unset means "keep the
+    // game's RendererConfig value", set replaces it before the Renderer is
+    // constructed. 0 for the cadence means the same as unset.
+    if (ctx.gpu_pass_timing.has_value()) {
+        config_.renderer_config.gpu_pass_timing = *ctx.gpu_pass_timing;
+    }
+    if (ctx.gpu_pass_timing_every != 0) {
+        config_.renderer_config.gpu_pass_timing_every = ctx.gpu_pass_timing_every;
+    }
 
     // An empty cache directory means "wherever the resolved per-user cache
     // root is". It used to default to "data/cache", which is relative to the

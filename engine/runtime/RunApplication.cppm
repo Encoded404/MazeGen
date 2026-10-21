@@ -296,6 +296,8 @@ export namespace VulkanEngine::Application {
         context.geometry_buffer_size_mb = config.geometry_buffer_size_mb;
         context.draw_mode = config.draw_mode;
         context.system_profile_sink = frame_profiler.Enabled() ? &frame_profiler : nullptr;
+        context.gpu_pass_timing = config.gpu_pass_timing;
+        context.gpu_pass_timing_every = config.gpu_pass_timing_every;
 
         VulkanEngine::Crash::Stage("app setup");
         if (!hooks.on_setup.Call(context)) {

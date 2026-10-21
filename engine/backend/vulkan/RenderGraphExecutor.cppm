@@ -7,6 +7,7 @@ import std;
 import vulkan;
 
 import VulkanShared.RenderGraphTypes;
+import VulkanBackend.Vulkan.GpuPassTimer;
 
 export namespace VulkanBackend::Vulkan {
 
@@ -21,12 +22,15 @@ void ExecuteRenderGraph(const VulkanEngine::RenderGraph::BarrierPlan& plan,
 // Records only passes [first_pass, last_pass) into command_buffer. Used by the
 // multi-queue submission path to record one queue run per command buffer. The
 // plan's barrier scopes are already clamped to each pass's queue, so this does
-// not need to know which queue the command buffer belongs to.
+// not need to know which queue the command buffer belongs to. When
+// `gpu_pass_timer` is non-null, every pass with an execute callback is bracketed
+// by a timestamp pair.
 void ExecuteRenderGraphRange(const VulkanEngine::RenderGraph::BarrierPlan& plan,
                              const VulkanEngine::RenderGraph::CompiledRenderGraph& graph,
                              std::uint32_t first_pass,
                              std::uint32_t last_pass,
                              const void* user_data,
-                             vk::CommandBuffer command_buffer);
+                             vk::CommandBuffer command_buffer,
+                             GpuPassTimer* gpu_pass_timer = nullptr);
 
 } // namespace VulkanBackend::Vulkan

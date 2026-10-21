@@ -36,6 +36,7 @@ import VulkanEngine.Render.Passes.TextPass;
 // Re-exported because RendererConfig names SceneRenderer::TextBackend.
 export import VulkanEngine.Render.Passes.WorldTextPass;
 import VulkanEngine.ShaderRegistration;
+import VulkanBackend.Vulkan.GpuPassTimer;
 
 #ifdef VKENGINE_PHYSICAL_CAMERA
 import VulkanEngine.PhysicalCameraSystem;
@@ -56,6 +57,12 @@ struct RendererConfig {
         VulkanEngine::SceneRenderer::kDefaultTextBackend;
     glm::vec4 clear_color{0.1f, 0.1f, 0.1f, 1.0f};
     vk::ClearDepthStencilValue clear_depth_stencil{1.0f, 0};
+    // Bracket every render-graph pass with a GPU timestamp pair and log a
+    // per-pass summary. Off by default: a diagnostic, and the queries cost a
+    // little per pass.
+    bool gpu_pass_timing = false;
+    // Frame renders collected between two per-pass summaries.
+    std::uint64_t gpu_pass_timing_every = 240;
 };
 
 class Renderer {
@@ -127,6 +134,18 @@ private:
     std::uint32_t frame_counter_ = 0;
     std::uint32_t last_swapchain_image_count_ = 0;
     std::unique_ptr<vk::raii::Sampler> default_sampler_{};
+
+    struct GpuPassAggregate {
+        std::string name{};
+        double total_ms = 0.0;
+        double max_ms = 0.0;
+        std::uint64_t samples = 0;
+    };
+    void CollectGpuPassTimings(std::uint32_t ring_index);
+    std::unique_ptr<VulkanBackend::Vulkan::GpuPassTimer> gpu_pass_timer_{};
+    std::uint64_t gpu_pass_log_every_ = 240;
+    std::uint64_t gpu_pass_collects_ = 0;
+    std::vector<GpuPassAggregate> gpu_pass_window_{};
 
 
     static constexpr vk::QueryPipelineStatisticFlags GPU_STATS_FLAGS =

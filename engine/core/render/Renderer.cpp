@@ -16,6 +16,7 @@ import vulkan;
 
 import VulkanBackend.Vulkan.VulkanBootstrap;
 import VulkanBackend.Vulkan.VulkanDebugUtils;
+import VulkanBackend.Vulkan.GpuPassTimer;
 import VulkanEngine.RenderGraph;
 import VulkanEngine.RenderPipeline;
 import VulkanEngine.SceneRenderer;
@@ -44,6 +45,67 @@ VulkanEngine::RenderPipeline::RenderPipeline& Renderer::GetRenderPipeline() {
 
 const VulkanEngine::RenderPipeline::RenderPipeline& Renderer::GetRenderPipeline() const {
     return *pipeline_;
+}
+
+void Renderer::CollectGpuPassTimings(const std::uint32_t ring_index) {
+    if (!gpu_pass_timer_ || !gpu_pass_timer_->Enabled()) {
+        return;
+    }
+
+    // The ring slot's prior submission is fence-complete by the time RenderFrame
+    // runs (acquire waited on the fence frames-in-flight back), so its timestamps
+    // are readable and its queries reusable.
+    gpu_pass_timer_->BeginFrame(ring_index);
+    std::vector<VulkanBackend::Vulkan::GpuPassSample> samples;
+    gpu_pass_timer_->Collect(samples);
+    if (samples.empty()) {
+        return;
+    }
+
+    for (const auto& sample : samples) {
+        const auto it = std::ranges::find_if(
+            gpu_pass_window_, [&sample](const GpuPassAggregate& aggregate) {
+                return aggregate.name == sample.name;
+            });
+        if (it == gpu_pass_window_.end()) {
+            gpu_pass_window_.push_back(
+                GpuPassAggregate{sample.name, sample.ms, sample.ms, 1});
+        } else {
+            it->total_ms += sample.ms;
+            it->max_ms = std::max(it->max_ms, sample.ms);
+            ++it->samples;
+        }
+    }
+
+    if (++gpu_pass_collects_ < gpu_pass_log_every_) {
+        return;
+    }
+
+    // Largest total first: the summary is read top-down for the hot pass.
+    std::ranges::sort(gpu_pass_window_,
+                      [](const GpuPassAggregate& a, const GpuPassAggregate& b) {
+                          return a.total_ms > b.total_ms;
+                      });
+    double sum_ms = 0.0;
+    for (const auto& aggregate : gpu_pass_window_) {
+        sum_ms += aggregate.total_ms;
+    }
+    const auto collects = static_cast<double>(gpu_pass_collects_);
+    LOGIFACE_LOG(info, std::format(
+        "GPU pass timing: {} window-renders, {} pass(es), {:.3f} ms per render "
+        "summed over passes",
+        gpu_pass_collects_, gpu_pass_window_.size(), sum_ms / collects));
+    for (const auto& aggregate : gpu_pass_window_) {
+        LOGIFACE_LOG(info, std::format(
+            "  {:<28} mean {:7.3f} ms  max {:7.3f} ms  n={}",
+            aggregate.name,
+            aggregate.total_ms / static_cast<double>(aggregate.samples),
+            aggregate.max_ms, aggregate.samples));
+    }
+    // Reset both together: a cleared window with a stale counter would log a
+    // one-sample summary on every later frame.
+    gpu_pass_window_.clear();
+    gpu_pass_collects_ = 0;
 }
 
 bool Renderer::Initialize(VulkanBackend::Vulkan::VulkanBootstrap& bootstrap,
@@ -278,6 +340,23 @@ bool Renderer::Initialize(VulkanBackend::Vulkan::VulkanBootstrap& bootstrap,
             static_cast<std::size_t>(stats_frames_in_flight_) * stats_run_slots_per_frame_, 0);
     }
 
+    gpu_pass_log_every_ = std::max<std::uint64_t>(config.gpu_pass_timing_every, 1u);
+    if (config.gpu_pass_timing) {
+        gpu_pass_timer_ = std::make_unique<VulkanBackend::Vulkan::GpuPassTimer>();
+        if (!gpu_pass_timer_->Initialize(
+                bootstrap.GetBackend().GetPhysicalDevice(),
+                bootstrap.GetBackend().GetDevice(),
+                bootstrap.GetBackend().GetGraphicsQueueFamily(),
+                std::max<std::uint32_t>(bootstrap.GetBackend().GetFramesInFlight(), 1))) {
+            gpu_pass_timer_.reset();
+        } else if (bootstrap.GetBackend().HasAsyncCompute()) {
+            LOGIFACE_LOG(info,
+                         "per-pass GPU timing covers graphics runs only: this device has a "
+                         "separate compute queue family and timestamps cannot span queues");
+        }
+    }
+    pipeline_->SetGpuPassTimer(gpu_pass_timer_.get());
+
     // Engine-owned sampler for app-pass sampled/combined-image bindings.
     {
         auto& device = bootstrap.GetBackend().GetDevice();
@@ -303,6 +382,15 @@ void Renderer::Shutdown() {
     stats_ring_frame_ids_.clear();
     stats_ring_run_kinds_.clear();
     default_sampler_.reset();
+    // Independent of pipeline_: the timer must be released even when the
+    // pipeline was already torn down (Shutdown is idempotent and runs twice on
+    // the normal exit path).
+    if (gpu_pass_timer_) {
+        gpu_pass_timer_->Shutdown();
+        gpu_pass_timer_.reset();
+    }
+    gpu_pass_window_.clear();
+    gpu_pass_collects_ = 0;
     if (pipeline_) {
         pipeline_->Shutdown();
         pipeline_.reset();
@@ -557,6 +645,7 @@ void Renderer::RenderFrame(VulkanBackend::Vulkan::VulkanBootstrap& bootstrap,
     };
 
     read_previous_run_stats();
+    CollectGpuPassTimings(ring_index);
 
     if (single_graphics_run) {
         // Existing single-queue fast path: one command buffer, no run list.
@@ -564,7 +653,13 @@ void Renderer::RenderFrame(VulkanBackend::Vulkan::VulkanBootstrap& bootstrap,
         cmd.reset({});
         cmd.begin({vk::CommandBufferUsageFlagBits::eOneTimeSubmit});
         begin_run_stats(cmd, 0, /*compute=*/false);
+        if (gpu_pass_timer_) {
+            gpu_pass_timer_->WritePrepBegin(cmd);
+        }
         record_prep(cmd);
+        if (gpu_pass_timer_) {
+            gpu_pass_timer_->WritePrepEnd(cmd);
+        }
         pipeline_->RecordRun(0, cmd);
         end_run_stats(cmd, 0, /*compute=*/false);
         note_run_slot(0);
@@ -587,7 +682,13 @@ void Renderer::RenderFrame(VulkanBackend::Vulkan::VulkanBootstrap& bootstrap,
             preamble_cmd.reset({});
             preamble_cmd.begin({vk::CommandBufferUsageFlagBits::eOneTimeSubmit});
             begin_run_stats(preamble_cmd, 0, /*compute=*/false);
+            if (gpu_pass_timer_) {
+                gpu_pass_timer_->WritePrepBegin(preamble_cmd);
+            }
             record_prep(preamble_cmd);
+            if (gpu_pass_timer_) {
+                gpu_pass_timer_->WritePrepEnd(preamble_cmd);
+            }
             end_run_stats(preamble_cmd, 0, /*compute=*/false);
             note_run_slot(0);
             preamble_cmd.end();
@@ -603,7 +704,13 @@ void Renderer::RenderFrame(VulkanBackend::Vulkan::VulkanBootstrap& bootstrap,
             begin_run_stats(run_cmd, run_slot, compute);
             if (i == 0 && slot_base == 0) {
                 // Run 0 is graphics: fold prep into it.
+                if (gpu_pass_timer_) {
+                    gpu_pass_timer_->WritePrepBegin(run_cmd);
+                }
                 record_prep(run_cmd);
+                if (gpu_pass_timer_) {
+                    gpu_pass_timer_->WritePrepEnd(run_cmd);
+                }
             }
             pipeline_->RecordRun(i, run_cmd);
             end_run_stats(run_cmd, run_slot, compute);
