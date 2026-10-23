@@ -126,5 +126,8 @@ troubleshooting.
 - **[docs/display-scaling.md](docs/display-scaling.md)** — logical points versus
   physical pixels: why the window flag is not optional, the single conversion
   screen text goes through, and what is deliberately left unscaled.
+- **[docs/maze-benchmark.md](docs/maze-benchmark.md)** — the headless
+  `maze_bench` target: sequential/random/walk lookup and wall-open workloads
+  over a maze-size sweep, plus the separate generation/density-build suite.
 - [docs/render-graph-parity-checklist.md](docs/render-graph-parity-checklist.md)
 - [docs/descriptor-rewiring-contract.md](docs/descriptor-rewiring-contract.md)

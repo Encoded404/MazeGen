@@ -932,11 +932,13 @@ if(WIN32)
 	unset(_vkengine_vcpkg_runtime_dir)
 endif()
 
-# Add subdirectories for the engine, the primary app, examples and tests
+# Add subdirectories for the engine, the primary app, examples, the headless
+# maze benchmark and tests
 include(AddApp)
 add_subdirectory(engine)
 add_subdirectory(app)
 add_subdirectory(examples)
+add_subdirectory(bench)
 
 if(BUILD_TESTING)
 	add_subdirectory(tests)

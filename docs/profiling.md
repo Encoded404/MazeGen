@@ -178,3 +178,9 @@ barrier layout checks (see
 
 The GPU flags are diagnostics, not a frame-pacing feature: they add query pairs
 and a log write, and leave present policy and `delta_time` untouched.
+
+## Related benchmark
+
+Both profilers above measure the engine and renderer. For the packed maze
+storage itself, `maze_bench` runs the lookup/set workloads headlessly on a
+device-free target; see [maze-benchmark.md](maze-benchmark.md).
