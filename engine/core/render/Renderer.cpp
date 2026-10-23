@@ -116,6 +116,7 @@ bool Renderer::Initialize(VulkanBackend::Vulkan::VulkanBootstrap& bootstrap,
                                   const VulkanEngine::EngineShaderIds* shader_ids) {
     bootstrap_ = &bootstrap;
     scene_renderer_ = &scene_renderer;
+    logged_multi_queue_runs_ = 0;
 
     pipeline_ = std::make_unique<VulkanEngine::RenderPipeline::RenderPipeline>();
     pipeline_->Initialize(bootstrap, shader_manager, pipeline_factory);
@@ -391,6 +392,7 @@ void Renderer::Shutdown() {
     }
     gpu_pass_window_.clear();
     gpu_pass_collects_ = 0;
+    logged_multi_queue_runs_ = 0;
     if (pipeline_) {
         pipeline_->Shutdown();
         pipeline_.reset();
@@ -649,6 +651,7 @@ void Renderer::RenderFrame(VulkanBackend::Vulkan::VulkanBootstrap& bootstrap,
 
     if (single_graphics_run) {
         // Existing single-queue fast path: one command buffer, no run list.
+        logged_multi_queue_runs_ = 0;
         auto& cmd = backend.GetCommandBuffer(frame_idx);
         cmd.reset({});
         cmd.begin({vk::CommandBufferUsageFlagBits::eOneTimeSubmit});
@@ -666,8 +669,14 @@ void Renderer::RenderFrame(VulkanBackend::Vulkan::VulkanBootstrap& bootstrap,
         cmd.end();
     } else {
         // Multi-queue path: one command buffer per queue run, submitted in order.
-        LOGIFACE_LOG(debug, "Renderer: multi-queue frame with " +
-                                std::to_string(runs.runs.size()) + " runs");
+        // The run count is graph topology, not per-frame state: report a
+        // transition once instead of repeating the line every frame.
+        const auto run_count = static_cast<std::uint32_t>(runs.runs.size());
+        if (run_count != logged_multi_queue_runs_) {
+            logged_multi_queue_runs_ = run_count;
+            LOGIFACE_LOG(debug, "Renderer: multi-queue path with " +
+                                    std::to_string(run_count) + " runs");
+        }
         std::vector<VulkanBackend::Vulkan::IVulkanBootstrap::QueueRunSubmit> submits;
         submits.reserve(runs.runs.size() + 1);
 

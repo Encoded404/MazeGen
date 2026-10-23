@@ -96,7 +96,7 @@ void GameEngine::RegisterFramePipeline() {
                     return;
                 }
                 if (!scene_valid_) {
-                    LOGIFACE_LOG(warn, "Game::FrameUpdate: scene_valid_ is false, skipping ProcessFrame");
+                    ReportSceneInvalidOnce();
                     return;
                 }
                 Application::ApplicationContext& app = fctx.App();
@@ -248,7 +248,8 @@ void GameEngine::RegisterFramePipeline() {
                 return;
             }
             if (!scene_valid_) {
-                LOGIFACE_LOG(debug, "Game::FrameRender: scene_valid_ is false, skipping");
+                // The public FrameRender guard reports the transition; this is
+                // only a defensive check for a scene invalidated mid-frame.
                 return;
             }
             ctx_.renderer->RenderFrame(*fctx.App().bootstrap,
@@ -1121,7 +1122,7 @@ std::vector<GameEngine::UploadedMesh> GameEngine::UploadScene(
     }
 
     ctx_.scene_renderer->SetSubmeshes(all_submeshes);
-    scene_valid_ = true;
+    MarkSceneValid();
 
     return result;
 }
@@ -1177,6 +1178,13 @@ void GameEngine::FrameUpdate(const VulkanEngine::Application::ApplicationContext
     frames_.Run(FramePhase::Bridge, fctx, ctx.system_profile_sink);
 }
 
+void GameEngine::ReportSceneInvalidOnce() {
+    if (scene_invalid_reported_) return;
+    scene_invalid_reported_ = true;
+    LOGIFACE_LOG(debug, "GameEngine: scene_valid_ is false; skipping mesh processing and rendering "
+                        "(reported once until a scene is uploaded)");
+}
+
 void GameEngine::FrameRender(const VulkanEngine::Application::ApplicationContext& ctx) {
     if (!ctx_.renderer) {
         LOGIFACE_LOG(warn, "Game::FrameRender: renderer is null, skipping");
@@ -1187,7 +1195,7 @@ void GameEngine::FrameRender(const VulkanEngine::Application::ApplicationContext
         return;
     }
     if (!scene_valid_) {
-        LOGIFACE_LOG(debug, "Game::FrameRender: scene_valid_ is false, skipping");
+        ReportSceneInvalidOnce();
         return;
     }
 
@@ -1220,6 +1228,7 @@ void GameEngine::Shutdown() {
     imgui_event_token_ = {};
 
     scene_valid_ = false;
+    scene_invalid_reported_ = false;
 
     initialized_ = false;
     vk_backend_ = nullptr;

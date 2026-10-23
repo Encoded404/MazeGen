@@ -81,7 +81,7 @@ void SceneRenderer::PrepareCompute(vk::CommandBuffer /*cmd*/,
 
     const std::uint32_t total = current_entity_count_;
     if (total == 0) {
-        LOGIFACE_LOG(debug, "PrepareCompute: current_entity_count_ is 0, no work to do");
+        LOGIFACE_LOG(trace, "PrepareCompute: current_entity_count_ is 0, no work to do");
     }
 
     // Grow the per-submesh block arrays. Each is bounded by Config::max_blocks
@@ -384,7 +384,7 @@ void SceneRenderer::DepthPrepass(vk::CommandBuffer cmd, std::uint32_t w, std::ui
         return;
     }
     if (!current_entity_count_) {
-        LOGIFACE_LOG(debug, "DepthPrepass: current_entity_count_ is 0, skipping");
+        LOGIFACE_LOG(trace, "DepthPrepass: current_entity_count_ is 0, skipping");
         return;
     }
     LOGIFACE_LOG(trace, "DepthPrepass: submesh_count=" + std::to_string(current_entity_count_) +
@@ -421,7 +421,7 @@ void SceneRenderer::OccluderPrepass(vk::CommandBuffer cmd, std::uint32_t w, std:
         return;
     }
     if (!current_entity_count_) {
-        LOGIFACE_LOG(debug, "OccluderPrepass: current_entity_count_ is 0, skipping");
+        LOGIFACE_LOG(trace, "OccluderPrepass: current_entity_count_ is 0, skipping");
         return;
     }
     LOGIFACE_LOG(trace, "OccluderPrepass: selected occluders (" + std::to_string(w) + "x" +
@@ -457,7 +457,7 @@ void SceneRenderer::Render(vk::CommandBuffer cmd,
                             std::uint32_t w, std::uint32_t h, std::uint32_t fi) {
     if (!w || !h) return;
     if (!current_entity_count_) {
-        LOGIFACE_LOG(debug, "Render: current_entity_count_ is 0, skipping");
+        LOGIFACE_LOG(trace, "Render: current_entity_count_ is 0, skipping");
         return;
     }
     auto& fr = frames_[fi % frames_in_flight_];
@@ -569,7 +569,7 @@ void SceneRenderer::DispatchExpand(vk::CommandBuffer cmd, std::uint32_t cnt,
                                     const glm::mat4& vp, std::uint32_t fi) {
     auto& fr = frames_[fi % frames_in_flight_];
     if (!cnt) {
-        LOGIFACE_LOG(debug, "DispatchExpand: cnt is 0, skipping");
+        LOGIFACE_LOG(trace, "DispatchExpand: cnt is 0, skipping");
         return;
     }
     LOGIFACE_LOG(trace, "DispatchExpand: submeshes=" + std::to_string(cnt));
@@ -590,11 +590,11 @@ void SceneRenderer::DispatchHiZGen(vk::CommandBuffer cmd, std::uint32_t w, std::
                                     std::uint32_t fi, std::uint32_t) {
     auto& fr = frames_[fi % frames_in_flight_];
     if (!current_entity_count_) {
-        LOGIFACE_LOG(debug, "DispatchHiZGen: current_entity_count_ is 0, skipping");
+        LOGIFACE_LOG(trace, "DispatchHiZGen: current_entity_count_ is 0, skipping");
         return;
     }
     if (!fr.hiz_set.IsValid()) {
-        LOGIFACE_LOG(debug, "DispatchHiZGen: hiz_set invalid, skipping");
+        LOGIFACE_LOG(trace, "DispatchHiZGen: hiz_set invalid, skipping");
         return;
     }
     if (w != depth_width_ || h != depth_height_) {
@@ -633,11 +633,11 @@ void SceneRenderer::DispatchHiZGen(vk::CommandBuffer cmd, std::uint32_t w, std::
 void SceneRenderer::DispatchOcclusion(vk::CommandBuffer cmd, std::uint32_t fi) {
     auto& fr = frames_[fi % frames_in_flight_];
     if (!current_entity_count_) {
-        LOGIFACE_LOG(debug, "DispatchOcclusion: current_entity_count_ is 0, skipping");
+        LOGIFACE_LOG(trace, "DispatchOcclusion: current_entity_count_ is 0, skipping");
         return;
     }
     if (!fr.occlusion_set.IsValid()) {
-        LOGIFACE_LOG(debug, "DispatchOcclusion: occlusion_set invalid, skipping");
+        LOGIFACE_LOG(trace, "DispatchOcclusion: occlusion_set invalid, skipping");
         return;
     }
     LOGIFACE_LOG(trace, "DispatchOcclusion: submeshes=" + std::to_string(current_entity_count_));
@@ -657,7 +657,7 @@ void SceneRenderer::DispatchOcclusion(vk::CommandBuffer cmd, std::uint32_t fi) {
 void SceneRenderer::DispatchCollect(vk::CommandBuffer cmd, std::uint32_t fi) {
     auto& fr = frames_[fi % frames_in_flight_];
     if (!current_entity_count_) {
-        LOGIFACE_LOG(debug, "DispatchCollect: current_entity_count_ is 0, skipping");
+        LOGIFACE_LOG(trace, "DispatchCollect: current_entity_count_ is 0, skipping");
         return;
     }
     // Only keys below the live draw-key count can appear in cull entries; the
@@ -736,7 +736,7 @@ void SceneRenderer::DispatchOccluderSelect(vk::CommandBuffer cmd,
     // compaction into the occluder-prepass draw command. Any set of large
     // real-geometry occluders is valid — overflow only misses culls.
     if (!current_entity_count_) {
-        LOGIFACE_LOG(debug, "DispatchOccluderSelect: current_entity_count_ is 0, skipping");
+        LOGIFACE_LOG(trace, "DispatchOccluderSelect: current_entity_count_ is 0, skipping");
         return;
     }
     auto& fr = frames_[fi % frames_in_flight_];
@@ -766,7 +766,7 @@ void SceneRenderer::DispatchPreCull(vk::CommandBuffer cmd, std::uint32_t fi) {
     // Culled submeshes get indexCount = 0 so the post-prepass occlusion pass
     // and collect skip them for free.
     if (!current_entity_count_) {
-        LOGIFACE_LOG(debug, "DispatchPreCull: current_entity_count_ is 0, skipping");
+        LOGIFACE_LOG(trace, "DispatchPreCull: current_entity_count_ is 0, skipping");
         return;
     }
     auto& fr = frames_[fi % frames_in_flight_];

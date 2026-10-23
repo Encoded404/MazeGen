@@ -147,6 +147,11 @@ private:
     std::uint64_t gpu_pass_collects_ = 0;
     std::vector<GpuPassAggregate> gpu_pass_window_{};
 
+    // Queue-run topology is stable across frames unless the graph changes, so
+    // the multi-queue diagnostic is a transition log, not a per-frame one.
+    // Zero means "the last frame used the single-graphics fast path".
+    std::uint32_t logged_multi_queue_runs_ = 0;
+
 
     static constexpr vk::QueryPipelineStatisticFlags GPU_STATS_FLAGS =
         vk::QueryPipelineStatisticFlagBits::eInputAssemblyVertices |

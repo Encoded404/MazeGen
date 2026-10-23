@@ -119,6 +119,10 @@ private:
     std::vector<std::uint32_t> free_handles_;
     std::vector<DeferredFree> deferred_free_queue_;
     std::uint32_t frames_in_flight_ = 3;
+    // UpdateStreamed runs once per dynamic mesh per frame; a broken handle
+    // would otherwise repeat the same diagnostic forever. Log once per handle
+    // and re-arm when an update succeeds.
+    std::unordered_set<std::uint32_t> reported_update_issues_{};
 };
 
 } // namespace VulkanEngine

@@ -289,7 +289,10 @@ public:
     // store no engine pointer of their own.
     [[nodiscard]] const ComponentContext& GetComponentContext() const { return component_context_; }
     bool IsInitialized() const { return initialized_; }
-    void MarkSceneValid() { scene_valid_ = true; }
+    void MarkSceneValid() {
+        scene_valid_ = true;
+        scene_invalid_reported_ = false;
+    }
     std::uint32_t UploadTextureToBindless(VulkanEngine::Application::ApplicationContext& ctx,
                                           TextureResource* tex,
                                           TextureSemantic semantic,
@@ -310,6 +313,10 @@ private:
     // The rendered-frame pipeline, seeded by the engine: every call the direct
     // path made, registered into a FrameSchedule phase (see FrameSchedule).
     void RegisterFramePipeline();
+
+    // A scene-less frame is a normal startup/menu state, not a per-frame
+    // warning. Report the transition into it once; MarkSceneValid re-arms it.
+    void ReportSceneInvalidOnce();
 
     // The engine's default module preset: device bootstrap, physics, resource
     // hooks, physical camera and the frame-phase seeds — registered through
@@ -361,6 +368,7 @@ private:
     std::uint16_t main_technique_id_ = 0;
     std::uint16_t main_draw_group_ = 0;
     bool scene_valid_ = false;
+    bool scene_invalid_reported_ = false;
     bool initialized_ = false;
 };
 

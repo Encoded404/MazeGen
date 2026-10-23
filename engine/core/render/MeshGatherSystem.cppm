@@ -72,6 +72,9 @@ private:
 
     std::vector<DrawEntity> static_ents_{};
     std::vector<DynamicEntity> dyn_ents_{};
+    // Dynamic-mesh problems are per-handle, not per-frame: report each broken
+    // handle once, and re-arm it when a later frame finds the mesh usable.
+    std::unordered_set<std::uint32_t> reported_dynamic_mesh_issues_{};
     std::array<std::uint32_t, SceneRenderer::SceneRenderer::MAX_DRAW_GROUPS> tech_submeshes_{};
     std::size_t last_static_count_ = 0;
     std::size_t last_dyn_count_ = 0;

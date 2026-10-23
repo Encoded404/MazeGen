@@ -286,15 +286,21 @@ void MeshManager::UpdateStreamed(Handle handle,
                                   const VulkanEngine::GpuResources::MeshData& data,
                                   std::uint32_t frame_index) {
     if (!handle.IsValid() || handle.id >= entries_.size()) {
-        LOGIFACE_LOG(debug, "UpdateStreamed: invalid handle (id=" +
-                     std::to_string(handle.id) + "), skipping");
+        if (LOGIFACE_ENABLED(debug) &&
+            reported_update_issues_.insert(handle.id).second) {
+            LOGIFACE_LOG(debug, "UpdateStreamed: invalid handle (id=" +
+                         std::to_string(handle.id) + "), skipping");
+        }
         return;
     }
 
     const auto& entry = entries_[handle.id];
     if (entry.strategy != Strategy::Streamed) {
-        LOGIFACE_LOG(debug, "UpdateStreamed: handle " + std::to_string(handle.id) +
-                     " is not Streamed, skipping");
+        if (LOGIFACE_ENABLED(debug) &&
+            reported_update_issues_.insert(handle.id).second) {
+            LOGIFACE_LOG(debug, "UpdateStreamed: handle " + std::to_string(handle.id) +
+                         " is not Streamed, skipping");
+        }
         return;
     }
 
@@ -303,10 +309,17 @@ void MeshManager::UpdateStreamed(Handle handle,
     const auto& idx_alloc = entry.info.streamed_index_alloc[fif];
 
     if (!vtx_alloc.IsValid() || !idx_alloc.IsValid()) {
-        LOGIFACE_LOG(debug, "UpdateStreamed: FIF " + std::to_string(fif) +
-                     " streamed alloc invalid for handle " + std::to_string(handle.id) +
-                     ", skipping");
+        if (LOGIFACE_ENABLED(debug) &&
+            reported_update_issues_.insert(handle.id).second) {
+            LOGIFACE_LOG(debug, "UpdateStreamed: FIF " + std::to_string(fif) +
+                         " streamed alloc invalid for handle " + std::to_string(handle.id) +
+                         ", skipping");
+        }
         return;
+    }
+
+    if (LOGIFACE_ENABLED(debug)) {
+        reported_update_issues_.erase(handle.id);
     }
 
     const std::uint64_t vertex_bytes = data.vertices.size() *

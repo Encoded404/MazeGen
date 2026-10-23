@@ -255,16 +255,30 @@ void MeshRenderSystem::ProcessFrame(ComponentRegistry& registry,
     {
         const std::uint32_t dyn_fif = frame_index % mesh_mgr.GetFramesInFlight();
         for (auto& e : dyn_ents_) {
+            const std::uint32_t handle_id = e.dyn_mesh->gpu_handle.id;
             const auto* gpu_info = mesh_mgr.GetMeshInfo(e.dyn_mesh->gpu_handle);
             if (!gpu_info) {
-                LOGIFACE_LOG(debug, "ProcessFrame: dynamic mesh gpu_handle invalid, skipping in count");
+                if (LOGIFACE_ENABLED(debug) &&
+                    reported_dynamic_mesh_issues_.insert(handle_id).second) {
+                    LOGIFACE_LOG(debug, "ProcessFrame: dynamic mesh gpu_handle invalid (id=" +
+                                 std::to_string(handle_id) +
+                                 "), skipping until the handle is repaired");
+                }
                 continue;
             }
             if (!gpu_info->streamed_vertex_alloc[dyn_fif].IsValid() ||
                 !gpu_info->streamed_index_alloc[dyn_fif].IsValid()) {
-                LOGIFACE_LOG(debug, "ProcessFrame: dynamic mesh FIF " + std::to_string(dyn_fif) +
-                             " streamed alloc invalid, skipping in count");
+                if (LOGIFACE_ENABLED(debug) &&
+                    reported_dynamic_mesh_issues_.insert(handle_id).second) {
+                    LOGIFACE_LOG(debug, "ProcessFrame: dynamic mesh FIF " +
+                                 std::to_string(dyn_fif) + " streamed alloc invalid (id=" +
+                                 std::to_string(handle_id) +
+                                 "), skipping until the allocation is repaired");
+                }
                 continue;
+            }
+            if (LOGIFACE_ENABLED(debug)) {
+                reported_dynamic_mesh_issues_.erase(handle_id);
             }
 
             if (e.dyn_mesh->submesh_count > 0) {
@@ -568,19 +582,14 @@ void MeshRenderSystem::ProcessFrame(ComponentRegistry& registry,
     for (auto& e : dyn_ents_) {
         if (ci >= total_submeshes) break;
         const auto* gpu_info = mesh_mgr.GetMeshInfo(e.dyn_mesh->gpu_handle);
-        if (!gpu_info) {
-            LOGIFACE_LOG(debug, "ProcessFrame: dynamic mesh gpu_handle invalid, skipping write");
-            continue;
-        }
+        // The count pass above already reported an unusable handle or FIF
+        // allocation once; the write pass stays quiet and just skips it.
+        if (!gpu_info) continue;
 
         const auto& vtx_alloc = gpu_info->streamed_vertex_alloc[fif];
         const auto& idx_alloc = gpu_info->streamed_index_alloc[fif];
 
-        if (!vtx_alloc.IsValid() || !idx_alloc.IsValid()) {
-            LOGIFACE_LOG(debug, "ProcessFrame: dynamic mesh FIF " + std::to_string(fif) +
-                         " streamed alloc invalid, skipping write");
-            continue;
-        }
+        if (!vtx_alloc.IsValid() || !idx_alloc.IsValid()) continue;
 
         const std::uint32_t vertex_buf_slot = static_vtx_count + vtx_alloc.buffer_index;
         assert(vtx_alloc.offset % sizeof(StandardMeshPipeline::Vertex) == 0 &&
