@@ -282,13 +282,19 @@ void MazeGeneratorApp::OnFrameUpdate(
 
     const float half_x = 0.5f * static_cast<float>(width) / p;
     const float half_y = 0.5f * static_cast<float>(height) / p;
+    // Allow overscroll of up to half the viewport on each side. Half a viewport
+    // is exactly half_x/half_y cells at the current zoom, so the old lower bound
+    // (half_x) becomes 0 and the upper bound (extent - half_x) becomes extent:
+    // the camera center may reach, but not leave, the maze's cell range. When
+    // the viewport is already larger than the maze, keep the maze centered
+    // rather than sliding it around inside its own margins.
     if (2.0f * half_x < static_cast<float>(kMazeWidth)) {
-        center_x_ = std::clamp(center_x_, half_x, static_cast<float>(kMazeWidth) - half_x);
+        center_x_ = std::clamp(center_x_, 0.0f, static_cast<float>(kMazeWidth));
     } else {
         center_x_ = 0.5f * static_cast<float>(kMazeWidth);
     }
     if (2.0f * half_y < static_cast<float>(kMazeHeight)) {
-        center_y_ = std::clamp(center_y_, half_y, static_cast<float>(kMazeHeight) - half_y);
+        center_y_ = std::clamp(center_y_, 0.0f, static_cast<float>(kMazeHeight));
     } else {
         center_y_ = 0.5f * static_cast<float>(kMazeHeight);
     }

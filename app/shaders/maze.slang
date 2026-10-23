@@ -127,6 +127,12 @@ float4 AnalyticMaze(float2 pixel) {
 
     const float s = 1.0 / pitch;
     const float2 u = center + (pixel - 0.5 * screen) / pitch;
+    // Outside the maze is empty background, not floor. The exact and density
+    // tiers already bound their sampling; without this check the floor color
+    // would leak into the region revealed by overscroll panning.
+    if (u.x < 0.0 || u.y < 0.0 || u.x >= float(width) || u.y >= float(height)) {
+        return kBackground;
+    }
     const float2 lo = u - 0.5 * s;
     const float2 hi = u + 0.5 * s;
 
