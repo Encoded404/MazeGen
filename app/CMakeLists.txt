@@ -1,6 +1,8 @@
 # Primary MazeGenerator application: a fullscreen maze pass reading the packed
 # TiledMaze bits directly, with no wall mesh.
 add_app(MazeGeneratorApp
+    OUTPUT_SUBDIR    app
+    FLAT_OUTPUT
     APP_TITLE        "MazeGenerator"
     APP_ID           "MazeGenerator"
     MODULE_PREFIX    MazeGenerator.App

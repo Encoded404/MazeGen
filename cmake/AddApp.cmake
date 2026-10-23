@@ -9,6 +9,8 @@ include_guard(GLOBAL)
 #     [APP_ID <id>]                  # storage app segment (default: <name>)
 #     [MODULE_PREFIX <prefix>]       # C++ module prefix (default: Apps.<name>)
 #     [SHADER_NAMESPACE <ns>]        # shader namespace segment (default: <name>)
+#     [OUTPUT_SUBDIR <dir>]          # role folder under bin (default: apps)
+#     [FLAT_OUTPUT]                  # omit the per-target output subdirectory
 #     SOURCES <file...>              # .cpp implementation files
 #     MODULES <file...>              # .cppm interface units (relative to the app dir)
 #     SHADERS <stem> <file> <stage> <entry> ...
@@ -17,7 +19,7 @@ include_guard(GLOBAL)
 #
 # Creates a fully-configured application executable target that links the
 # engine via EngineRuntime. Each app is self-contained:
-#   - output goes to bin/apps/<Config>/<name>/
+#   - output goes to bin/<OUTPUT_SUBDIR>/<Config>[/<name>]/
 #   - engine + app shaders are deployed to <exe_dir>/shaders
 #   - asset dirs are copied to <exe_dir>/<dir>
 #   - modules are C++23 std-module based (Clang)
@@ -33,8 +35,8 @@ include_guard(GLOBAL)
 #=======================================================================]
 function(add_app NAME)
     cmake_parse_arguments(PARSE_ARGV 1 ADD_APP
-        ""
-        "MODULE_PREFIX;SHADER_NAMESPACE;APP_TITLE;ORG_ID;APP_ID"
+        "FLAT_OUTPUT"
+        "MODULE_PREFIX;SHADER_NAMESPACE;APP_TITLE;ORG_ID;APP_ID;OUTPUT_SUBDIR"
         "SOURCES;MODULES;SHADERS;ASSET_DIRS"
     )
 
@@ -56,16 +58,26 @@ function(add_app NAME)
     if(NOT ADD_APP_APP_ID)
         set(ADD_APP_APP_ID "${NAME}")
     endif()
+    if(NOT ADD_APP_OUTPUT_SUBDIR)
+        set(ADD_APP_OUTPUT_SUBDIR "apps")
+    endif()
 
     add_executable(${NAME} ${ADD_APP_SOURCES})
 
-    # Every app lands in bin/apps/<Config>/<name>/ - the shader and asset
+    # Apps are grouped by role (app/, examples/, ...) under bin/. The per-target
+    # directory keeps each app's shaders and assets isolated; FLAT_OUTPUT drops
+    # it for role folders that hold exactly one executable. The shader and asset
     # deploys below follow automatically via $<TARGET_FILE_DIR>.
     if(OUTPUT_PATH)
+        set(_add_app_output_dir "${OUTPUT_PATH}/${ADD_APP_OUTPUT_SUBDIR}/$<CONFIG>")
+        if(NOT ADD_APP_FLAT_OUTPUT)
+            string(APPEND _add_app_output_dir "/${NAME}")
+        endif()
         set_target_properties(${NAME} PROPERTIES
             OUTPUT_NAME ${NAME}
-            RUNTIME_OUTPUT_DIRECTORY "${OUTPUT_PATH}/apps/$<CONFIG>/${NAME}"
+            RUNTIME_OUTPUT_DIRECTORY "${_add_app_output_dir}"
         )
+        unset(_add_app_output_dir)
     endif()
 
     # Windows: build as a GUI-subsystem executable so no console window appears

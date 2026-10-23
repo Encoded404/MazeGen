@@ -3,6 +3,7 @@
 # wheels, a static ground plane with ramps and crates, and the physics debug
 # overlay drawn through ImGui.
 add_app(physics_vehicle
+    OUTPUT_SUBDIR    examples
     APP_TITLE        "MazeGenerator Physics Vehicle"
     MODULE_PREFIX    Examples.PhysicsVehicle
     SHADER_NAMESPACE PhysicsVehicle

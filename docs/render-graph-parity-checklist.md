@@ -7,7 +7,7 @@ barrier planning, resource aliasing, or the pass dispatch path.
 Run the reference scene with validation layers and watch the log:
 
 ```bash
-./build/bin/basic_scene --validation
+./build/bin/examples/Debug/basic_scene/basic_scene --validation
 ```
 
 1. **Startup** — no validation errors or warnings during instance/device/swapchain

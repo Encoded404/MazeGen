@@ -86,7 +86,7 @@ game. Levels are `trace`, `debug`, `info` (default), `warn`, `error` and `off`:
 
 ```
 leaderboard_server --log-level debug
-VKENGINE_LEADERBOARD_LOG=debug ./build/bin/apps/Debug/infinite_runner/infinite_runner
+VKENGINE_LEADERBOARD_LOG=debug ./build/bin/examples/Debug/infinite_runner/infinite_runner
 ```
 
 `info` reports connections, handshakes, registrations, logins and accepted

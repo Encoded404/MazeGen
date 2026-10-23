@@ -3,6 +3,7 @@
 # to add another example and rename the target, MODULE_PREFIX and
 # SHADER_NAMESPACE.
 add_app(minimal
+    OUTPUT_SUBDIR    examples
     APP_TITLE        "MazeGenerator Minimal"
     MODULE_PREFIX    Examples.Minimal
     SHADER_NAMESPACE Minimal

@@ -52,6 +52,7 @@ endif()
 # No SHADERS: the example relies entirely on the engine's built-in shader set
 # (the standard PBR mesh shader for its occluder and the two text pipelines).
 add_app(text_demo
+    OUTPUT_SUBDIR   examples
     APP_TITLE       "MazeGenerator Text Demo"
     MODULE_PREFIX   Examples.TextDemo
     SHADER_NAMESPACE TextDemo

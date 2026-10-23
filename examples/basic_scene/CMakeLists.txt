@@ -1,4 +1,5 @@
 add_app(basic_scene
+    OUTPUT_SUBDIR   examples
     APP_TITLE       "MazeGenerator Basic Scene"
     MODULE_PREFIX   Examples.BasicScene
     SHADER_NAMESPACE BasicScene

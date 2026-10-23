@@ -49,6 +49,7 @@ endif()
 
 # ── The example executable ──────────────────────────────────────────────
 add_app(custom_pass
+    OUTPUT_SUBDIR   examples
     APP_TITLE       "MazeGenerator Custom Pass"
     MODULE_PREFIX   Examples.CustomPass
     SHADER_NAMESPACE CustomPass

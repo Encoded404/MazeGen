@@ -81,6 +81,7 @@ add_subdirectory(account)
 # colour textures), so no asset files are needed. It uses the engine's built-in
 # standard PBR mesh shader (no per-example SHADERS).
 add_app(infinite_runner
+    OUTPUT_SUBDIR    examples
     APP_TITLE        "MazeGenerator Infinite Runner"
     MODULE_PREFIX    Examples.InfiniteRunner
     SOURCES

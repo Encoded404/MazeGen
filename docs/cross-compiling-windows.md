@@ -74,14 +74,15 @@ libc++, and turns off the options that are not available for a MinGW target.
 cmake --build --preset windows-release        # or windows-debug / windows-relwithdebinfo
 ```
 
-Resulting executables land in `build-windows/bin/apps/<Config>/<name>/`, e.g.
-`build-windows/bin/apps/Release/MazeGeneratorApp/MazeGeneratorApp.exe`, together
-with the runtime DLLs that `add_app` copies next to them.
+Resulting executables land in `build-windows/bin/app/<Config>/` for the primary
+app and in `build-windows/bin/examples/<Config>/<name>/` for the examples, e.g.
+`build-windows/bin/app/Release/MazeGeneratorApp.exe`, together with the runtime
+DLLs that `add_app` copies next to them.
 
 ## 5. Run (optional, via wine)
 
 ```bash
-wine build-windows/bin/apps/Release/MazeGeneratorApp/MazeGeneratorApp.exe
+wine build-windows/bin/app/Release/MazeGeneratorApp.exe
 ```
 
 The `vulkan-1.dll` next to the executable is deployed by the build, so wine does
@@ -124,7 +125,7 @@ normal noise.
 - **`wine: Library libc++.dll (or libunwind.dll) not found`** — run the
   executable from its output directory (the build copies the llvm-mingw
   runtimes there), e.g.
-  `wine build-windows/bin/apps/Release/MazeGeneratorApp/MazeGeneratorApp.exe`.
+  `wine build-windows/bin/app/Release/MazeGeneratorApp.exe`.
 - **Updating llvm-mingw** — download a newer release into `toolchains/` (the
   newest `toolchains/llvm-mingw*` directory is picked up automatically) and
   delete `build-windows`.

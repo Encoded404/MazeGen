@@ -61,8 +61,9 @@ cmake --build build --config Debug   # or Release/RelWithDebInfo
 
 The primary application is the `MazeGeneratorApp` target in `app/`, declared
 with the `add_app` helper. Its executable is written to
-`build/bin/apps/<Config>/MazeGeneratorApp/`, with the engine shaders and the
-app's own shaders deployed next to it.
+`build/bin/app/<Config>/MazeGeneratorApp`, with the engine shaders and the
+app's own shaders deployed next to it. Examples are built to
+`build/bin/examples/<Config>/<name>/`.
 
 ## Tests
 
@@ -99,9 +100,10 @@ cmake --preset windows
 cmake --build --preset windows-release
 ```
 
-The executables end up in `build-windows/bin/apps/<Config>/<name>/`, with the
-required runtime DLLs copied next to them (run them with `wine` if you want to
-test on the host).
+The app lands in `build-windows/bin/app/<Config>/MazeGeneratorApp.exe` and the
+examples in `build-windows/bin/examples/<Config>/<name>/`, with the required
+runtime DLLs copied next to them (run them with `wine` if you want to test on
+the host).
 
 Cross-compiling requires **CMake ≥ 4.2**. Shader hot reload
 (`-DVKENGINE_HOT_RELOAD`) is disabled for Windows targets, and on the native

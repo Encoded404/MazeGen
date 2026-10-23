@@ -4,6 +4,7 @@
 # default preset module. No custom shaders: the engine's built-in PBR set covers
 # the fallback-quad crates.
 add_app(physics_composed
+    OUTPUT_SUBDIR    examples
     APP_TITLE        "MazeGenerator Composed Physics"
     MODULE_PREFIX    Examples.PhysicsComposed
     SHADER_NAMESPACE PhysicsComposed

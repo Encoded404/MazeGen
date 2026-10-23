@@ -16,7 +16,7 @@ The app binaries are multi-config; the path below assumes a RelWithDebInfo
 build (the only build whose numbers are worth reading):
 
 ```bash
-BIN=build/bin/apps/RelWithDebInfo/basic_scene/basic_scene
+BIN=build/bin/examples/RelWithDebInfo/basic_scene/basic_scene
 
 # CPU loop profile, one summary every 300 iterations.
 "$BIN" --frame-profile --frame-profile-every 300 --max-frames 900
