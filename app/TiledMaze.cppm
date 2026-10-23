@@ -17,7 +17,7 @@
 // A plain vector<uint64_t> is only guaranteed 8-byte alignment, so Tile is
 // alignas(64): that is what makes "one tile == one 64-byte line" real.
 //
-// This file is standalone for now: nothing imports TiledMaze yet.
+// The app imports this module and uploads RawBytes() to the maze shader.
 
 module;
 
@@ -53,6 +53,18 @@ public:
 
     [[nodiscard]] std::uint32_t Width() const noexcept { return width_; }
     [[nodiscard]] std::uint32_t Height() const noexcept { return height_; }
+    [[nodiscard]] std::uint32_t TilesX() const noexcept {
+        return static_cast<std::uint32_t>(tiles_x_);
+    }
+    [[nodiscard]] std::uint32_t TilesY() const noexcept {
+        return static_cast<std::uint32_t>(tiles_y_);
+    }
+
+    // The complete padded tile storage as bytes. Tiles are 64-byte-aligned
+    // and exactly 64 bytes, so the byte view is the shader's flat word array.
+    [[nodiscard]] std::span<const std::byte> RawBytes() const noexcept {
+        return std::as_bytes(std::span<const Tile>{tiles_.data(), tiles_.size()});
+    }
 
     [[nodiscard]] bool North(std::uint32_t x, std::uint32_t y) const noexcept;
     [[nodiscard]] bool West(std::uint32_t x, std::uint32_t y) const noexcept;
