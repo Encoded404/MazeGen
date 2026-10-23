@@ -11,11 +11,11 @@ import Runtime.Overrides;
 
 export namespace Runtime {
 
-// CLI builder for example executables.
+// CLI builder for app executables.
 //
 // The runtime owns the CLI11 app, the --help formatter, all engine-standard
 // options (-l/--log-level, --validation/--no-validation, --overwrite,
-// --force-disable-ext) and the construction of ApplicationConfig. Examples
+// --force-disable-ext) and the construction of ApplicationConfig. Apps
 // register their own options on App() and their own --overwrite keys via
 // RegisterOverride(), then call Parse() and build their game with the parsed
 // values.
@@ -24,15 +24,15 @@ public:
     // `app_name` is the user-facing title (window and --help). `org_id` and
     // `app_id` are the storage identity: two path components under the per-user
     // root, which must stay stable across releases. build systems normally
-    // supply them (see add_engine_example) so that every executable gets its own
+    // supply them (see add_app) so that every executable gets its own
     // directory; passing the title as app_id would make all of them share one.
     explicit Cli(std::string_view app_name, std::string_view org_id, std::string_view app_id);
 
-    // Register an example-defined --overwrite key. Must be called before
+    // Register an app-defined --overwrite key. Must be called before
     // Parse() so the option validation and the --help footer see it.
     void RegisterOverride(OverrideSpec spec);
 
-    // Underlying CLI11 app — register example-specific options on it.
+    // Underlying CLI11 app — register app-specific options on it.
     CLI::App& App() { return app_; }
 
     // Parses argv; returns false when the app should exit (--help, bad args).

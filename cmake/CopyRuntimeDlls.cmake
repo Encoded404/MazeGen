@@ -2,7 +2,7 @@
 # output directory.
 #
 # Invoked as a script (cmake -P) once per executable from the POST_BUILD step
-# in add_engine_example:
+# in add_app:
 #
 #   cmake -DDLL_DIRS=<dir>[;<dir>...] -DEXE=<exe> -DOBJDUMP=<tool>
 #         [-DSTRIP=<tool>] -DDEST=<exe dir> -P CopyRuntimeDlls.cmake

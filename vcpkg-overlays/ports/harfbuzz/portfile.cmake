@@ -1,4 +1,4 @@
-# Overlay port (see vcpkg-overlays/ports/harfbuzz in VulkanEngineV5).
+# Overlay port (see vcpkg-overlays/ports/harfbuzz in MazeGenerator).
 #
 # This is a verbatim copy of the upstream vcpkg harfbuzz port (now at version
 # 14.5.1) plus a local addition appended at the end of harfbuzzConfig.cmake.in.

@@ -48,8 +48,8 @@ if(COMMAND enable_target_clang_tidy)
 endif()
 
 # ── The example executable ──────────────────────────────────────────────
-add_engine_example(custom_pass
-    APP_TITLE       "VulkanEngineV5 Custom Pass"
+add_app(custom_pass
+    APP_TITLE       "MazeGenerator Custom Pass"
     MODULE_PREFIX   Examples.CustomPass
     SHADER_NAMESPACE CustomPass
     SOURCES

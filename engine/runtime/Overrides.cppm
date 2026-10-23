@@ -77,7 +77,7 @@ public:
     GplStructurePolicy gpl_structure = GplStructurePolicy::Auto;
     std::optional<DrawMode> draw_mode = std::nullopt;
 
-    // Register an example-defined --overwrite key. Must be called before
+    // Register an app-defined --overwrite key. Must be called before
     // Apply()/GenerateHelp() so parse and help see it.
     void Register(OverrideSpec spec);
 

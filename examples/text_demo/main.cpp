@@ -10,7 +10,7 @@ import Examples.TextDemo.Config;
 import Examples.TextDemo.Game;
 
 int VulkanEngine::AppMain(int argc, char* const argv[]) {
-    Runtime::Cli cli{"VulkanEngineV5 Text Demo", VKENGINE_ORG_ID, VKENGINE_APP_ID};
+    Runtime::Cli cli{"MazeGenerator Text Demo", VKENGINE_ORG_ID, VKENGINE_APP_ID};
 
     // The world-text backend is the one choice the example makes at startup.
     // msdf is the engine default; slug selects the analytic hb-gpu rasterizer.

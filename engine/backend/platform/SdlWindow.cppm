@@ -21,7 +21,7 @@ enum class PlatformStatus : std::uint8_t {
 };
 
 struct PlatformConfig {
-    std::string window_title = "VulkanEngineV5"; // NOLINT(misc-non-private-member-variables-in-classes)
+    std::string window_title = "MazeGenerator"; // NOLINT(misc-non-private-member-variables-in-classes)
     std::uint32_t window_width = 1280; // NOLINT(misc-non-private-member-variables-in-classes)
     std::uint32_t window_height = 720; // NOLINT(misc-non-private-member-variables-in-classes)
 };

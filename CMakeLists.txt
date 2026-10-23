@@ -47,7 +47,7 @@ if( NOT CMAKE_EXPERIMENTAL_CXX_IMPORT_STD )
     endif()
 endif()
 
-set(PROJECT_NAME "VulkanEngineV5")
+set(PROJECT_NAME "MazeGenerator")
 set(BACKEND_TARGET "VulkanBackend")
 set(ENGINE_TARGET "VulkanEngine")
 set(RUNTIME_TARGET "EngineRuntime")
@@ -57,7 +57,7 @@ set(ENTRY_TARGET "EngineEntryPoint")
 # for the whole project so every executable built here shares a directory
 # group; a fork shipping its own product changes this in one place. Forks must
 # also change it rather than inherit, or two products would share user data.
-set(VKENGINE_DEFAULT_ORG_ID "VulkanEngineV5" CACHE STRING
+set(VKENGINE_DEFAULT_ORG_ID "MazeGenerator" CACHE STRING
     "Organization id used as the first component of the per-user storage path")
 
 set(CMAKE_CXX_EXTENSIONS OFF CACHE BOOL "Use standard C++" FORCE)
@@ -405,7 +405,7 @@ include(CTest)
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
 
 # Sanitizers interface for Debug builds (applied to the engine libs and to
-# every example via add_engine_example).
+# every app via add_app).
 option(ENABLE_SANITIZERS "Enable AddressSanitizer and UndefinedBehaviorSanitizer in Debug mode" ON)
 # Windows/MinGW targets: llvm-mingw's default runtimes do not include the
 # sanitizer runtimes (there is no UBSan for MinGW, and the Windows ASan runtime
@@ -606,7 +606,7 @@ int main() {
         endif()
         # Executables that link project_libcpp_static must also depend on the
         # sanitizer outputs; the helper functions that create executables
-        # (add_engine_example, setup_test_target, and the standalone targets)
+        # (add_app, setup_test_target, and the standalone targets)
         # do this next to their link hook.
     endif()
 endif()
@@ -623,7 +623,7 @@ target_link_options(project_sections INTERFACE
 
 # ── Size knobs that cost nothing in debuggability ──────────────────────
 # Linked next to project_sections, i.e. onto the engine libs, the tests and
-# every example.
+# every app.
 #
 # Debug info is 60-85% of the bytes in the Debug and RelWithDebInfo binaries,
 # so compressing it is the single largest win available on ELF: gdb, lldb and
@@ -858,7 +858,7 @@ if(NOT EXISTS "${CMAKE_SOURCE_DIR}/external/Monocypher/src/monocypher.c")
     message(FATAL_ERROR "Missing Monocypher at external/Monocypher; run: git submodule update --init external/Monocypher")
 endif()
 
-# Runs on the build machine to seal each per-example secrets folder into a
+# Runs on the build machine to seal each per-app secrets folder into a
 # generated C++ module. Like slang-spirv-compiler it is a host tool: when
 # cross-compiling it must be built for the host, never the target.
 set(VKENGINE_SECRETS_GEN_COMMAND "")
@@ -916,7 +916,7 @@ endif()
 # ----------------------------
 # Windows runtime DLL deployment
 # ----------------------------
-# Directories scanned by add_engine_example (cmake/CopyRuntimeDlls.cmake) to
+# Directories scanned by add_app (cmake/CopyRuntimeDlls.cmake) to
 # place the shared runtime and dependency DLLs next to each built executable:
 #   * vcpkg dependencies (all dynamic on the MinGW triplet)
 #   * the llvm-mingw runtimes (libc++.dll, libunwind.dll, libwinpthread-1.dll)
@@ -932,8 +932,10 @@ if(WIN32)
 	unset(_vkengine_vcpkg_runtime_dir)
 endif()
 
-# Add subdirectories for engine, examples and tests
+# Add subdirectories for the engine, the primary app, examples and tests
+include(AddApp)
 add_subdirectory(engine)
+add_subdirectory(app)
 add_subdirectory(examples)
 
 if(BUILD_TESTING)

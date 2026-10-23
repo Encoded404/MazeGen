@@ -1,6 +1,6 @@
 {
-    "name": "vulkan-engine-v5",
-    "description": "Vulkan Engine V5",
+    "name": "maze-generator",
+    "description": "MazeGenerator",
     "version": "1.0.0",
     "license": "MIT",
     "dependencies": [

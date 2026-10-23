@@ -80,8 +80,8 @@ add_subdirectory(account)
 # Geometry and colours are generated at runtime (procedural cube + solid
 # colour textures), so no asset files are needed. It uses the engine's built-in
 # standard PBR mesh shader (no per-example SHADERS).
-add_engine_example(infinite_runner
-    APP_TITLE        "VulkanEngineV5 Infinite Runner"
+add_app(infinite_runner
+    APP_TITLE        "MazeGenerator Infinite Runner"
     MODULE_PREFIX    Examples.InfiniteRunner
     SOURCES
         main.cpp

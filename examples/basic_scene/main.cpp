@@ -11,7 +11,7 @@ import VulkanEngine.Application;
 import Examples.BasicScene.Game;
 
 int VulkanEngine::AppMain(int argc, char* const argv[]) {
-    Runtime::Cli cli{"VulkanEngineV5 Basic Scene", VKENGINE_ORG_ID, VKENGINE_APP_ID};
+    Runtime::Cli cli{"MazeGenerator Basic Scene", VKENGINE_ORG_ID, VKENGINE_APP_ID};
 
     Examples::BasicScene::Game::RenderMode render_mode = Examples::BasicScene::Game::RenderMode::Normal;
     cli.App().add_option("-m,--mode", render_mode, "Rendering mode")

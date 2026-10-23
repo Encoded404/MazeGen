@@ -51,8 +51,8 @@ endif()
 # ── The example executable ─────────────────────────────────────────────
 # No SHADERS: the example relies entirely on the engine's built-in shader set
 # (the standard PBR mesh shader for its occluder and the two text pipelines).
-add_engine_example(text_demo
-    APP_TITLE       "VulkanEngineV5 Text Demo"
+add_app(text_demo
+    APP_TITLE       "MazeGenerator Text Demo"
     MODULE_PREFIX   Examples.TextDemo
     SHADER_NAMESPACE TextDemo
     SOURCES

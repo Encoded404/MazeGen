@@ -24,7 +24,7 @@ namespace detail {
     try {
         VULKAN_HPP_DEFAULT_DISPATCHER.init(loader);
         vk::raii::Context context;
-        const vk::ApplicationInfo app_info("VulkanEngineV5-tests", 1, "VulkanEngineV5-tests", 1, vk::ApiVersion13);
+        const vk::ApplicationInfo app_info("MazeGenerator-tests", 1, "MazeGenerator-tests", 1, vk::ApiVersion13);
         const vk::InstanceCreateInfo create_info({}, &app_info);
         const vk::raii::Instance instance(context, create_info);
         return !instance.enumeratePhysicalDevices().empty();

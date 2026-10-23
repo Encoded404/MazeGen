@@ -38,7 +38,7 @@ constexpr std::string_view kFontFile = "Lato-Regular.ttf";
 
 // Screen-space strings. The body is deliberately long enough to wrap and is
 // centred, which is what exercises the layout stage of the submission seam.
-constexpr std::string_view kScreenTitle = "VulkanEngineV5 text";
+constexpr std::string_view kScreenTitle = "MazeGenerator text";
 constexpr std::string_view kScreenBody =
     "HarfBuzz shapes each string once, in design units, so a run is reusable at "
     "every size. The screen path rasterizes it hinted into an A8 page; the world "

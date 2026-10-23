@@ -39,8 +39,8 @@ bool HeadlessVulkanBackend::CreateInstance(const VulkanBackend::Vulkan::VulkanBo
         loader_ = std::make_unique<vk::detail::DynamicLoader>();
         VULKAN_HPP_DEFAULT_DISPATCHER.init(loader_->getProcAddress<PFN_vkGetInstanceProcAddr>("vkGetInstanceProcAddr"));
         context_ = std::make_unique<vk::raii::Context>();
-        vk::ApplicationInfo app_info("VulkanEngineV5-headless-tests", 1,
-                                     "VulkanEngineV5-headless-tests", 1,
+        vk::ApplicationInfo app_info("MazeGenerator-headless-tests", 1,
+                                     "MazeGenerator-headless-tests", 1,
                                      vk::ApiVersion13);
         vk::InstanceCreateInfo info({}, &app_info);
         instance_ = std::make_unique<vk::raii::Instance>(*context_, info);

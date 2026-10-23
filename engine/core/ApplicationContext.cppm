@@ -92,15 +92,15 @@ struct ApplicationContext {
 };
 
 struct ApplicationConfig {
-    std::string app_name = "VulkanEngineV5"; // NOLINT(misc-non-private-member-variables-in-classes)
+    std::string app_name = "MazeGenerator"; // NOLINT(misc-non-private-member-variables-in-classes)
     // Application identity, and therefore a pair of directory names under the
     // per-user root. Distinct from app_name on purpose: app_name is the window
     // and CLI title, which gets edited, while these must never change once
     // shipped or every existing user's settings and saves move. Keep them
     // ASCII, short and free of spaces where possible; both are sanitized before
     // use, so punctuation degrades to a usable name rather than failing.
-    std::string org_id = "VulkanEngineV5"; // NOLINT(misc-non-private-member-variables-in-classes)
-    std::string app_id = "VulkanEngineV5"; // NOLINT(misc-non-private-member-variables-in-classes)
+    std::string org_id = "MazeGenerator"; // NOLINT(misc-non-private-member-variables-in-classes)
+    std::string app_id = "MazeGenerator"; // NOLINT(misc-non-private-member-variables-in-classes)
     // Location of the running executable. Used only to detect portable mode
     // (a marker file beside the binary); empty disables that check.
     std::filesystem::path executable_path{}; // NOLINT(misc-non-private-member-variables-in-classes)

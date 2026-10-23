@@ -10,7 +10,7 @@ import Examples.InfiniteRunner.Game;
 
 int VulkanEngine::AppMain(int argc, char* const argv[]) {
     // Runtime::Cli is a engine wrapper around CLI11 which provides a simple way to parse command line arguments.
-    Runtime::Cli cli{"VulkanEngineV5 Infinite Runner", VKENGINE_ORG_ID, VKENGINE_APP_ID};
+    Runtime::Cli cli{"MazeGenerator Infinite Runner", VKENGINE_ORG_ID, VKENGINE_APP_ID};
 
     std::string leaderboard_host;
     cli.App().add_option("--leaderboard-host", leaderboard_host,

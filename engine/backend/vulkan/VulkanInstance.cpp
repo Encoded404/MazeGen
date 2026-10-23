@@ -215,7 +215,7 @@ bool VulkanInstance::Initialize(const VulkanBootstrapConfig& config) {
         vk::DebugUtilsMessageTypeFlagBitsEXT::ePerformance;
     messenger_ci.pfnUserCallback = &DebugUtilsCallback;
 
-    constexpr vk::ApplicationInfo app_info("VulkanEngineV5", 1, "VulkanEngineV5", 1, vk::ApiVersion13);
+    constexpr vk::ApplicationInfo app_info("MazeGenerator", 1, "MazeGenerator", 1, vk::ApiVersion13);
     vk::InstanceCreateInfo instance_info({}, &app_info,
         static_cast<std::uint32_t>(instance_layers.size()), instance_layers.data(),
         static_cast<std::uint32_t>(instance_extension_names.size()), instance_extension_names.data());

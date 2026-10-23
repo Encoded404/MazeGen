@@ -1,5 +1,5 @@
-add_engine_example(basic_scene
-    APP_TITLE       "VulkanEngineV5 Basic Scene"
+add_app(basic_scene
+    APP_TITLE       "MazeGenerator Basic Scene"
     MODULE_PREFIX   Examples.BasicScene
     SHADER_NAMESPACE BasicScene
     SOURCES

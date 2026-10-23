@@ -9,7 +9,7 @@ import Runtime.ExampleCli;
 import Examples.PhysicsVehicle.Game;
 
 int VulkanEngine::AppMain(int argc, char* const argv[]) {
-    Runtime::Cli cli{"VulkanEngineV5 Physics Vehicle", VKENGINE_ORG_ID, VKENGINE_APP_ID};
+    Runtime::Cli cli{"MazeGenerator Physics Vehicle", VKENGINE_ORG_ID, VKENGINE_APP_ID};
 
     if (!cli.Parse(argc, argv)) {
         return cli.ExitCode();

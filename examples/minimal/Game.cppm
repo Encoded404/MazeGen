@@ -9,8 +9,9 @@ import VulkanShared.CallbackList;
 
 export namespace Examples::Minimal::Game {
 
-// Smallest possible engine app: setup engine, register one shader, render
-// one mesh with a camera. Intended as the template for new apps/examples.
+// Smallest possible engine example: setup engine, register one shader, render
+// one mesh with a camera. The primary app is app/; this is a compact reference
+// for adding more examples.
 class Game {
 public:
     explicit Game(const std::filesystem::path& executable_path);

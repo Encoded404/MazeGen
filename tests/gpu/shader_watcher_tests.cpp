@@ -22,7 +22,7 @@ struct BareDevice {
 
 BareDevice CreateBareDevice() {
     BareDevice bare{};
-    const vk::ApplicationInfo app_info("VulkanEngineV5-tests", 1, "VulkanEngineV5-tests", 1, vk::ApiVersion13);
+    const vk::ApplicationInfo app_info("MazeGenerator-tests", 1, "MazeGenerator-tests", 1, vk::ApiVersion13);
     bare.instance = vk::raii::Instance(bare.context, vk::InstanceCreateInfo({}, &app_info));
     const auto devices = bare.instance.enumeratePhysicalDevices();
     if (devices.empty()) {

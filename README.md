@@ -1,3 +1,5 @@
+# MazeGenerator
+
 this is a engine designed around good PC performance
 
 ## Notes
@@ -26,7 +28,7 @@ you can follow the guide [here](https://github.com/microsoft/vcpkg) for installa
 
 ```bash
 git clone <repo-url>
-cd VulkanEngineV5
+cd MazeGenerator
 ```
 
 ## Configure
@@ -54,6 +56,13 @@ cmake -S . -B build -DCMAKE_TOOLCHAIN_FILE="$VCPKG_ROOT/scripts/buildsystems/vcp
 ```bash
 cmake --build build --config Debug   # or Release/RelWithDebInfo
 ```
+
+## App
+
+The primary application is the `MazeGeneratorApp` target in `app/`, declared
+with the `add_app` helper. Its executable is written to
+`build/bin/apps/<Config>/MazeGeneratorApp/`, with the engine shaders and the
+app's own shaders deployed next to it.
 
 ## Tests
 
@@ -90,8 +99,9 @@ cmake --preset windows
 cmake --build --preset windows-release
 ```
 
-The executables end up in `build-windows/Release/`, with the required runtime
-DLLs copied next to them (run them with `wine` if you want to test on the host).
+The executables end up in `build-windows/bin/apps/<Config>/<name>/`, with the
+required runtime DLLs copied next to them (run them with `wine` if you want to
+test on the host).
 
 Cross-compiling requires **CMake ≥ 4.2**. Shader hot reload
 (`-DVKENGINE_HOT_RELOAD`) is disabled for Windows targets, and on the native

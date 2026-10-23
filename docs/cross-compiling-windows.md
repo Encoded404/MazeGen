@@ -33,7 +33,7 @@ Download the newest **ucrt** release for your Linux host from
 it in place:
 
 ```bash
-cd /path/to/VulkanEngineV5
+cd /path/to/MazeGenerator
 
 mkdir -p toolchains
 # put the newest llvm-mingw-*-ucrt-ubuntu-*-x86_64.tar.xz here
@@ -74,14 +74,14 @@ libc++, and turns off the options that are not available for a MinGW target.
 cmake --build --preset windows-release        # or windows-debug / windows-relwithdebinfo
 ```
 
-Resulting executables land in `build-windows/<Config>/`, e.g.
-`build-windows/Release/infinite_runner.exe`, together with the runtime DLLs that
-`add_engine_example` copies next to them.
+Resulting executables land in `build-windows/bin/apps/<Config>/<name>/`, e.g.
+`build-windows/bin/apps/Release/MazeGeneratorApp/MazeGeneratorApp.exe`, together
+with the runtime DLLs that `add_app` copies next to them.
 
 ## 5. Run (optional, via wine)
 
 ```bash
-wine build-windows/Release/infinite_runner.exe
+wine build-windows/bin/apps/Release/MazeGeneratorApp/MazeGeneratorApp.exe
 ```
 
 The `vulkan-1.dll` next to the executable is deployed by the build, so wine does
@@ -123,7 +123,8 @@ normal noise.
   ```
 - **`wine: Library libc++.dll (or libunwind.dll) not found`** — run the
   executable from its output directory (the build copies the llvm-mingw
-  runtimes there), e.g. `wine build-windows/Release/infinite_runner.exe`.
+  runtimes there), e.g.
+  `wine build-windows/bin/apps/Release/MazeGeneratorApp/MazeGeneratorApp.exe`.
 - **Updating llvm-mingw** — download a newer release into `toolchains/` (the
   newest `toolchains/llvm-mingw*` directory is picked up automatically) and
   delete `build-windows`.

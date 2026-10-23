@@ -109,7 +109,7 @@ std::atomic<std::intptr_t> g_log_handle{-1};
 char g_report_dir[1024] = ".";
 char g_session_path[1200] = "";
 char g_crash_path[1200] = "";
-char g_app_name[128] = "VulkanEngineV5";
+char g_app_name[128] = "MazeGenerator";
 char g_boot_time[64] = "";
 
 // ── Async-safe raw output ──────────────────────────────────────────────

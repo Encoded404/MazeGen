@@ -1,4 +1,4 @@
-# Overlay port (see vcpkg-overlays/ports/msdfgen in VulkanEngineV5).
+# Overlay port (see vcpkg-overlays/ports/msdfgen in MazeGenerator).
 #
 # Upstream vcpkg msdfgen port with ONE addition: the linkage check below. The
 # rest is verbatim from upstream at 1.13+new-skia-api.

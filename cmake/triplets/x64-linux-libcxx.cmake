@@ -12,7 +12,7 @@ set(VCPKG_CHAINLOAD_TOOLCHAIN_FILE "${CMAKE_CURRENT_LIST_DIR}/../toolchains/clan
 # defines. Splitting functions and data into their own sections lets the
 # linker's --gc-sections drop the unreachable remainder.
 #
-# What this buys, measured on the Release example binary:
+# What this buys, measured on the Release app binary:
 #   * the BasisU encoder inside libktx (basisu_frontend/comp/uastc_enc/...) is
 #     pulled in only because lib/miniz_wrapper.cpp.o references
 #     buminiz::mz_compress2, which lives in basisu_comp.cpp.o; with per-function

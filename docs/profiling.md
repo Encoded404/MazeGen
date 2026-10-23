@@ -12,11 +12,11 @@ for profiling and the renderer creates no timestamp query pool and writes no
 timestamps. (The existing pipeline-statistics queries are a separate, always-on
 feature.)
 
-The example binaries are multi-config; the path below assumes a RelWithDebInfo
+The app binaries are multi-config; the path below assumes a RelWithDebInfo
 build (the only build whose numbers are worth reading):
 
 ```bash
-BIN=build/bin/examples/RelWithDebInfo/basic_scene/basic_scene
+BIN=build/bin/apps/RelWithDebInfo/basic_scene/basic_scene
 
 # CPU loop profile, one summary every 300 iterations.
 "$BIN" --frame-profile --frame-profile-every 300 --max-frames 900

@@ -1,4 +1,4 @@
-include(AddEngineExample)
+include(AddApp)
 
 add_subdirectory(minimal)
 add_subdirectory(physics_vehicle)
