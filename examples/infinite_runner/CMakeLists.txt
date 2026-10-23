@@ -1,4 +1,4 @@
-# ── Shared simulation core ──────────────────────────────────────────────
+    # ── Shared simulation core ──────────────────────────────────────────────
 # BalanceConfig (ruleset + runtime fingerprint) and the pure geometry helpers
 # (Sweep, Wall) live in their own static library so the example, the tests and
 # future leaderboard tooling can import one definition of the ruleset.

@@ -63,6 +63,9 @@ void MazeRenderPass::Setup(VulkanEngine::PipelinePass::PassSetupContext& ctx) {
     ctx.RequestGraphicsPipeline(vertex_shader_, fragment_shader_);
     ctx.DeclarePushConstants<MazeConstants>(vk::ShaderStageFlagBits::eFragment);
     ctx.RunAfter(VulkanEngine::PipelinePass::BuiltinPass::MainPass);
+    // The maze pass replaces the scene and clears the backbuffer, so it must
+    // run before the ImGui overlay or the UI would be wiped.
+    ctx.RunBefore(VulkanEngine::PipelinePass::BuiltinPass::ImGui);
 }
 
 void MazeRenderPass::Execute(const VulkanEngine::PipelinePass::FrameContext& ctx,

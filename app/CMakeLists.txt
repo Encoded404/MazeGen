@@ -1,5 +1,6 @@
 # Primary MazeGenerator application: a fullscreen maze pass reading the packed
-# TiledMaze bits directly, with no wall mesh.
+# TiledMaze bits directly, with no wall mesh, plus an incremental-solver debug
+# overlay and an ImGui control panel.
 add_app(MazeGeneratorApp
     OUTPUT_SUBDIR    app
     FLAT_OUTPUT
@@ -11,12 +12,22 @@ add_app(MazeGeneratorApp
         main.cpp
         App.cpp
         MazeRenderPass.cpp
+        DebugOverlayPass.cpp
     MODULES
         App.cppm
         TiledMaze.cppm
-        MazeRenderPass.cppm
         MazeDensity.cppm
+        MazeRenderPass.cppm
+        Generation.cppm
+        RandomGenerator.cppm
+        Generators.cppm
+        Solver.cppm
+        AStarSolver.cppm
+        Solvers.cppm
+        DebugGrid.cppm
+        DebugOverlayPass.cppm
     SHADERS
         MazeFullscreenVert maze_fullscreen_vert.slang vertex   main
         MazeFrag           maze.slang                 fragment main
+        DebugOverlayFrag   debug_overlay.slang        fragment main
 )
