@@ -77,11 +77,13 @@ TEST(GenerationTest, RejectsEmptyDimensions) {
     EXPECT_FALSE(maze.has_value());
 }
 
-TEST(GeneratorRegistryTest, ExposesRandomWithOneParameterRow) {
-    ASSERT_EQ(std::size(MazeGenerator::kMazeGenerators), 1U);
+TEST(GeneratorRegistryTest, ExposesRegisteredGenerators) {
+    ASSERT_EQ(std::size(MazeGenerator::kMazeGenerators), 2U);
     EXPECT_EQ(MazeGenerator::kMazeGenerators[0].name, "Random");
     ASSERT_EQ(MazeGenerator::kMazeGenerators[0].floats.size(), 1U);
     EXPECT_NE(MazeGenerator::kMazeGenerators[0].generate, nullptr);
+    EXPECT_EQ(MazeGenerator::kMazeGenerators[1].name, "CustomGeneratorV1");
+    EXPECT_NE(MazeGenerator::kMazeGenerators[1].generate, nullptr);
 }
 
 } // namespace

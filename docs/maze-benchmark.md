@@ -83,9 +83,10 @@ sizes, and the memory clock.
   independent random lookups can. Do not read a lower walk number as "the walk
   is faster": it is also spatially local, so it mostly stays in L1/L2. Compare
   it against itself across sizes, not against `random-lookup`.
-- **`random-open` is a clear-bit write.** The public API only opens walls; there
-  is no `CloseNorth`. Each 1024-operation block uses one setter so an
-  unpredictable north/west branch does not end up inside the measured loop.
+- **`random-open` is a clear-bit write.** Each 1024-operation block uses one
+  setter (`OpenNorth`/`OpenWest`) so an unpredictable north/west branch does not
+  end up inside the measured loop. The symmetric `CloseNorth`/`CloseWest` exist
+  but are not benchmarked.
 
 ## Flags
 

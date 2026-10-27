@@ -76,6 +76,14 @@ public:
     void OpenSouth(std::uint32_t x, std::uint32_t y) noexcept;
     void OpenEast(std::uint32_t x, std::uint32_t y) noexcept;
 
+    // Close a wall that was previously opened. Like the South()/East()
+    // accessors, the south/east setters redirect to the neighbouring cell, so
+    // they also address the extra boundary row/column.
+    void CloseNorth(std::uint32_t x, std::uint32_t y) noexcept;
+    void CloseWest(std::uint32_t x, std::uint32_t y) noexcept;
+    void CloseSouth(std::uint32_t x, std::uint32_t y) noexcept;
+    void CloseEast(std::uint32_t x, std::uint32_t y) noexcept;
+
     [[nodiscard]] bool operator==(const TiledMaze& other) const noexcept;
 
 private:
@@ -106,6 +114,7 @@ private:
     [[nodiscard]] CellPos Locate(std::uint32_t x, std::uint32_t y) const noexcept;
     [[nodiscard]] bool Bit(CellPos pos, std::uint32_t offset) const noexcept;
     void Clear(CellPos pos, std::uint32_t offset) noexcept;
+    void Set(CellPos pos, std::uint32_t offset) noexcept;
 
     std::uint32_t width_ = 0;
     std::uint32_t height_ = 0;
@@ -211,6 +220,13 @@ inline void TiledMaze::Clear(CellPos pos, std::uint32_t offset) noexcept {
     tiles_[pos.tile].words[pos.word] &= ~(std::uint64_t{1} << (pos.shift + offset));
 }
 
+inline void TiledMaze::Set(CellPos pos, std::uint32_t offset) noexcept {
+    assert(pos.tile < tiles_.size());
+    assert(pos.word < kWordsPerTile);
+    assert(pos.shift + offset < 64);
+    tiles_[pos.tile].words[pos.word] |= (std::uint64_t{1} << (pos.shift + offset));
+}
+
 inline bool TiledMaze::North(std::uint32_t x, std::uint32_t y) const noexcept {
     return Bit(Locate(x, y), 0U);
 }
@@ -245,6 +261,22 @@ inline void TiledMaze::OpenSouth(std::uint32_t x, std::uint32_t y) noexcept {
 
 inline void TiledMaze::OpenEast(std::uint32_t x, std::uint32_t y) noexcept {
     OpenWest(x + 1, y);
+}
+
+inline void TiledMaze::CloseNorth(std::uint32_t x, std::uint32_t y) noexcept {
+    Set(Locate(x, y), 0U);
+}
+
+inline void TiledMaze::CloseWest(std::uint32_t x, std::uint32_t y) noexcept {
+    Set(Locate(x, y), 1U);
+}
+
+inline void TiledMaze::CloseSouth(std::uint32_t x, std::uint32_t y) noexcept {
+    Set(Locate(x, y + 1), 0U);
+}
+
+inline void TiledMaze::CloseEast(std::uint32_t x, std::uint32_t y) noexcept {
+    Set(Locate(x + 1, y), 1U);
 }
 
 inline bool TiledMaze::operator==(const TiledMaze& other) const noexcept {
