@@ -11,6 +11,7 @@ export module MazeGenerator.Solvers.AStar;
 
 import std;
 
+import MazeGenerator.PackedCellGrid;
 import MazeGenerator.Solver;
 import MazeGenerator.TiledMaze;
 
@@ -67,7 +68,8 @@ private:
 
     std::vector<std::uint32_t> g_;
     std::vector<std::int32_t> parent_;
-    std::vector<std::uint8_t> state_; // kUnseen / kOpen / kClosed
+    // Two bits per cell: kUnseen / kOpen / kClosed.
+    SolverStateGrid state_;
     OpenQueue open_;
 
     std::vector<SolverCellChange> changes_;
@@ -85,7 +87,7 @@ AStarSolver::Reset(const TiledMaze& maze, CellRef start, CellRef goal) {
     const std::size_t cell_count = static_cast<std::size_t>(width_) * height_;
     g_.assign(cell_count, kUnreachable);
     parent_.assign(cell_count, -1);
-    state_.assign(cell_count, kUnseen);
+    state_.Reset(width_, height_);
     open_ = OpenQueue{};
     changes_.clear();
     stats_ = {};
@@ -93,7 +95,7 @@ AStarSolver::Reset(const TiledMaze& maze, CellRef start, CellRef goal) {
     current_ = kInvalidCell;
 
     g_[start_] = 0;
-    state_[start_] = kOpen;
+    state_.Set(start_, kOpen);
     open_.push({Heuristic(start_), 0, start_});
     stats_.frontier = 1;
     Emit(start_, SolverCellFlag::Open);
@@ -110,11 +112,11 @@ AStarSolver::Step(const TiledMaze& maze, std::uint32_t max_expansions) {
         open_.pop();
 
         const CellIndex cell = node.cell;
-        if (state_[cell] == kClosed) {
+        if (state_.Get(cell) == kClosed) {
             continue; // stale queue entry from an earlier, worse g
         }
 
-        state_[cell] = kClosed;
+        state_.Set(cell, kClosed);
         ++stats_.expanded;
         if (stats_.frontier > 0) {
             --stats_.frontier;
@@ -171,15 +173,16 @@ inline void AStarSolver::Relax(CellIndex from, CellIndex to, std::int8_t dir) {
     g_[to] = candidate;
     parent_[to] = static_cast<std::int32_t>(from);
 
-    if (state_[to] == kUnseen) {
-        state_[to] = kOpen;
+    const std::uint32_t to_state = state_.Get(to);
+    if (to_state == kUnseen) {
+        state_.Set(to, kOpen);
         ++stats_.frontier;
         Emit(to, SolverCellFlag::Open, dir);
-    } else if (state_[to] == kClosed) {
+    } else if (to_state == kClosed) {
         // Manhattan on unit four-neighbour edges is consistent, so this never
         // happens in practice; keep the state and the visualization coherent
         // if a future variant uses an inconsistent heuristic.
-        state_[to] = kOpen;
+        state_.Set(to, kOpen);
         ++stats_.frontier;
         Emit(to, SolverCellFlag::Open, dir);
     } else {

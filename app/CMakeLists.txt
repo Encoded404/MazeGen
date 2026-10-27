@@ -16,6 +16,7 @@ add_app(MazeGeneratorApp
     MODULES
         App.cppm
         TiledMaze.cppm
+        PackedCellGrid.cppm
         MazeDensity.cppm
         MazeRenderPass.cppm
         Generation.cppm

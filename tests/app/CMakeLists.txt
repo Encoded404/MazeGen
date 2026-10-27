@@ -4,6 +4,7 @@ add_executable(app_tests
     debug_grid_tests.cpp
     generation_tests.cpp
     tiled_maze_tests.cpp
+    packed_cell_grid_tests.cpp
 )
 
 # Compile the app's standalone modules into the test target so the density
@@ -15,6 +16,7 @@ if(CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
         BASE_DIRS ${CMAKE_SOURCE_DIR}/app
         FILES
             ${CMAKE_SOURCE_DIR}/app/TiledMaze.cppm
+            ${CMAKE_SOURCE_DIR}/app/PackedCellGrid.cppm
             ${CMAKE_SOURCE_DIR}/app/MazeDensity.cppm
             ${CMAKE_SOURCE_DIR}/app/Generation.cppm
             ${CMAKE_SOURCE_DIR}/app/generators/Random.cppm
