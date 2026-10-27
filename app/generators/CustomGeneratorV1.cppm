@@ -15,8 +15,7 @@ import MazeGenerator.TiledMaze;
 
 export namespace MazeGenerator {
 
-[[nodiscard]] inline std::optional<TiledMaze> GenerateCustomGeneratorV1(
-    const MazeSpec& spec, const MazeGenSettings& settings) {
+[[nodiscard]] inline std::optional<TiledMaze> GenerateCustomGeneratorV1(const MazeSpec& spec, const MazeGenSettings& settings) {
     (void)spec;
     (void)settings;
     // TODO: implement the CustomGeneratorV1 algorithm.

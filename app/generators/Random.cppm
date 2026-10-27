@@ -12,8 +12,7 @@ import MazeGenerator.TiledMaze;
 
 export namespace MazeGenerator {
 
-[[nodiscard]] inline std::optional<TiledMaze> GenerateRandomMaze(
-    const MazeSpec& spec, const MazeGenSettings& settings) {
+[[nodiscard]] inline std::optional<TiledMaze> GenerateRandomMaze(const MazeSpec& spec, const MazeGenSettings& settings) {
     if (spec.width == 0 || spec.height == 0) {
         return std::nullopt;
     }
