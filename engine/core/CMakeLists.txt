@@ -142,11 +142,15 @@ if(VKENGINE_PHYSICAL_CAMERA)
 endif()
 
 # ── Jolt physics ────────────────────────────────────────────────────────
-# Compile-time switch mirroring VKENGINE_PHYSICAL_CAMERA: when OFF no physics
-# code is built, no Jolt symbol is referenced and the facade is absent (all uses
-# are macro-guarded). Jolt types are confined to implementation .cpp files; the
-# module interfaces above the facade never include a Jolt header.
-option(VKENGINE_PHYSICS "Enable Jolt physics support" ON)
+# Opt-in: this application does not use physics, so Jolt is not part of the
+# default build. `-DVKENGINE_PHYSICS=ON` builds the facade, its ECS frame
+# contract and the physics tests. When OFF no physics code is built, no Jolt
+# symbol is referenced and the facade is absent (all uses are macro-guarded).
+# `physics/PhysicsTypes.cppm` is the exception: it names no Jolt type and is part
+# of the asset contract (`MeshTypes` imports it unconditionally), so it is always
+# built. Jolt types are confined to implementation .cpp files; the module
+# interfaces above the facade never include a Jolt header.
+option(VKENGINE_PHYSICS "Enable Jolt physics support" OFF)
 if(VKENGINE_PHYSICS)
     find_package(Jolt CONFIG REQUIRED)
 
@@ -532,12 +536,20 @@ if(CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
                 physical_camera/PhysicalCameraSystem.cppm
         )
     endif()
+    # PhysicsTypes is Jolt-free and imported unconditionally by the asset layer
+    # (`VulkanEngine.Mesh.MeshTypes`), so it is built whether or not the Jolt
+    # backend is enabled.
+    target_sources(${ENGINE_TARGET} PUBLIC
+        FILE_SET CXX_MODULES
+        BASE_DIRS ${CMAKE_CURRENT_SOURCE_DIR}
+        FILES
+            physics/PhysicsTypes.cppm
+    )
     if(VKENGINE_PHYSICS)
         target_sources(${ENGINE_TARGET} PUBLIC
             FILE_SET CXX_MODULES
             BASE_DIRS ${CMAKE_CURRENT_SOURCE_DIR}
             FILES
-                physics/PhysicsTypes.cppm
                 physics/PhysicsEvents.cppm
                 physics/PhysicsComponents.cppm
                 physics/PhysicsWorld.cppm

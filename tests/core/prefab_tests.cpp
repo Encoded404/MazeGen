@@ -3,8 +3,8 @@
 //
 // The component context is a granted service view; prefabs compose standard
 // component bundles through the same registry hooks the engine modules own.
-// Physics runs against Jolt (no Vulkan device), so nothing here creates a
-// Vulkan object.
+// The Jolt-backed prefab tests are compiled only when VKENGINE_PHYSICS is
+// enabled; Jolt needs no Vulkan device, so nothing here creates a Vulkan object.
 
 #include <gtest/gtest.h>
 
@@ -18,11 +18,13 @@ import VulkanEngine.ECS.ComponentRegistry;
 import VulkanEngine.ECS.Prefabs;
 import VulkanEngine.Components.Transform;
 import VulkanEngine.Components.MeshReference;
+#ifdef VKENGINE_PHYSICS
 import VulkanEngine.Physics.Types;
 import VulkanEngine.Physics.Components;
 import VulkanEngine.Physics.World;
 import VulkanEngine.Physics.Character;
 import VulkanEngine.Physics.BodyBridge;
+#endif
 
 namespace {
 
@@ -31,6 +33,7 @@ using Prefabs::Prefab;
 using Prefabs::kNoMesh;
 using Components::Transform;
 using Components::MeshReference;
+#ifdef VKENGINE_PHYSICS
 using Physics::RigidBody;
 using Physics::Collider;
 using Physics::Character;
@@ -40,7 +43,9 @@ using Physics::BodyMotionType;
 using Physics::ShapeType;
 using Physics::ShapeDesc;
 using Physics::World;
+#endif
 
+#ifdef VKENGINE_PHYSICS
 [[nodiscard]] RigidBody BoxBody(glm::vec3 extent, BodyMotionType motion, float mass = 1.0f) {
     RigidBody body{};
     body.shape.type = ShapeType::Box;
@@ -51,6 +56,7 @@ using Physics::World;
     body.friction = 0.5f;
     return body;
 }
+#endif
 
 } // namespace
 
@@ -106,6 +112,7 @@ TEST(PrefabTest, APoseOnlyPrefabIsAPlainTransformEntity) {
     EXPECT_FALSE(entity->HasComponent<MeshReference>());
 }
 
+#ifdef VKENGINE_PHYSICS
 TEST(PrefabTest, AFullBundleComposesOnOneEntity) {
     ComponentRegistry registry;
     World world;
@@ -186,3 +193,4 @@ TEST(PrefabTest, ColliderBundlesComposeIntoCompoundBodies) {
     EXPECT_TRUE(entity.GetComponent<RigidBody>()->body.IsValid());
     world.Shutdown();
 }
+#endif
