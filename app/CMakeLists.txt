@@ -19,10 +19,11 @@ add_app(MazeGeneratorApp
         MazeDensity.cppm
         MazeRenderPass.cppm
         Generation.cppm
-        RandomGenerator.cppm
+        generators/Random.cppm
+        generators/CustomGeneratorV1.cppm
         Generators.cppm
         Solver.cppm
-        AStarSolver.cppm
+        solvers/AStar.cppm
         Solvers.cppm
         DebugGrid.cppm
         DebugOverlayPass.cppm

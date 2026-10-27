@@ -3,6 +3,7 @@ add_executable(app_tests
     solver_tests.cpp
     debug_grid_tests.cpp
     generation_tests.cpp
+    tiled_maze_tests.cpp
 )
 
 # Compile the app's standalone modules into the test target so the density
@@ -16,10 +17,11 @@ if(CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
             ${CMAKE_SOURCE_DIR}/app/TiledMaze.cppm
             ${CMAKE_SOURCE_DIR}/app/MazeDensity.cppm
             ${CMAKE_SOURCE_DIR}/app/Generation.cppm
-            ${CMAKE_SOURCE_DIR}/app/RandomGenerator.cppm
+            ${CMAKE_SOURCE_DIR}/app/generators/Random.cppm
+            ${CMAKE_SOURCE_DIR}/app/generators/CustomGeneratorV1.cppm
             ${CMAKE_SOURCE_DIR}/app/Generators.cppm
             ${CMAKE_SOURCE_DIR}/app/Solver.cppm
-            ${CMAKE_SOURCE_DIR}/app/AStarSolver.cppm
+            ${CMAKE_SOURCE_DIR}/app/solvers/AStar.cppm
             ${CMAKE_SOURCE_DIR}/app/Solvers.cppm
             ${CMAKE_SOURCE_DIR}/app/DebugGrid.cppm
     )

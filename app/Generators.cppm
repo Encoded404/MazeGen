@@ -1,5 +1,6 @@
-// The generator registry. Adding a generator is a new .cppm with a generate
-// function plus one entry in kMazeGenerators; the UI and the App read the table.
+// The generator registry. Adding a generator is a new .cppm under
+// app/generators/ with a generate function plus one entry in kMazeGenerators;
+// the UI and the App read the table.
 
 module;
 
@@ -8,6 +9,7 @@ export module MazeGenerator.Generators;
 import std;
 
 import MazeGenerator.Generation;
+import MazeGenerator.Generators.CustomGeneratorV1;
 import MazeGenerator.Generators.Random;
 
 export namespace MazeGenerator {
@@ -25,6 +27,7 @@ inline constexpr FloatParam kRandomParams[] = {
 
 inline constexpr MazeGeneratorType kMazeGenerators[] = {
     {"Random", &GenerateRandomMaze, std::span<const FloatParam>{kRandomParams}, {}},
+    {"CustomGeneratorV1", &GenerateCustomGeneratorV1, {}, {}},
 };
 
 [[nodiscard]] inline std::span<const MazeGeneratorType> MazeGeneratorTypes() noexcept {

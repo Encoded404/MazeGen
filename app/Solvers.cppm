@@ -1,5 +1,6 @@
-// Solver registry. Adding a solver is a new .cppm implementing IMazeSolver plus
-// one row here; the UI combo and the App read kSolverTypes.
+// Solver registry. Adding a solver is a new .cppm under app/solvers/
+// implementing IMazeSolver plus one row here; the UI combo and the App read
+// kSolverTypes.
 
 module;
 
