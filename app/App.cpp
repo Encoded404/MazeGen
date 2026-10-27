@@ -212,12 +212,114 @@ void ClampAxisCenter(float& center, float half_view, float extent) {
     return "unknown";
 }
 
+// ImGui's Combo getter for EnumOption spans. `data` points at the span passed
+// to Enum() and only lives for the duration of the Combo call.
+[[nodiscard]] const char* EnumOptionsGetter(void* data, int index) {
+    const auto* options = static_cast<const std::span<const EnumOption>*>(data);
+    if (options == nullptr || index < 0 ||
+        index >= static_cast<int>(options->size())) {
+        return nullptr;
+    }
+    return (*options)[static_cast<std::size_t>(index)].label;
+}
+
+// Renders a generator's settings through ImGui. This is the only place the
+// settings system touches ImGui; the generator modules stay UI-free and their
+// settings remain plain structs.
+class ImGuiSettingsVisitor final : public SettingsVisitor {
+public:
+    void Float(const char* label, float& value, float min, float max,
+               const char* format, FieldHint hint) override {
+        ImGui::SetNextItemWidth(240.0f);
+        switch (hint) {
+            case FieldHint::Slider:
+                ImGui::SliderFloat(label, &value, min, max, format);
+                break;
+            case FieldHint::Drag:
+                ImGui::DragFloat(label, &value, 0.01f, min, max, format);
+                break;
+            case FieldHint::Input:
+                ImGui::InputFloat(label, &value, 0.0f, 0.0f, format);
+                break;
+        }
+    }
+
+    void Int(const char* label, int& value, int min, int max,
+             FieldHint hint) override {
+        ImGui::SetNextItemWidth(240.0f);
+        switch (hint) {
+            case FieldHint::Slider:
+                ImGui::SliderInt(label, &value, min, max);
+                break;
+            case FieldHint::Drag:
+                ImGui::DragInt(label, &value, 1.0f, min, max);
+                break;
+            case FieldHint::Input:
+                ImGui::InputInt(label, &value);
+                break;
+        }
+    }
+
+    void Bool(const char* label, bool& value) override {
+        ImGui::Checkbox(label, &value);
+    }
+
+    void Enum(const char* label, int& value,
+              std::span<const EnumOption> options) override {
+        int index = 0;
+        for (int i = 0; i < static_cast<int>(options.size()); ++i) {
+            if (options[static_cast<std::size_t>(i)].value == value) {
+                index = i;
+                break;
+            }
+        }
+        ImGui::SetNextItemWidth(240.0f);
+        if (ImGui::Combo(label, &index, &EnumOptionsGetter, &options,
+                         static_cast<int>(options.size())) &&
+            index >= 0 && index < static_cast<int>(options.size())) {
+            value = options[static_cast<std::size_t>(index)].value;
+        }
+    }
+
+    void Path(const char* label, std::string& value) override {
+        std::array<char, 1024> buffer{};
+        const std::size_t count = std::min(value.size(), buffer.size() - 1);
+        std::memcpy(buffer.data(), value.data(), count);
+        ImGui::SetNextItemWidth(240.0f);
+        if (ImGui::InputText(label, buffer.data(), buffer.size())) {
+            value = buffer.data();
+        }
+    }
+
+    bool BeginGroup(const char* label, bool default_open) override {
+        const ImGuiTreeNodeFlags flags =
+            default_open ? ImGuiTreeNodeFlags_DefaultOpen : ImGuiTreeNodeFlags_None;
+        if (!ImGui::CollapsingHeader(label, flags)) {
+            return false;
+        }
+        ImGui::PushID(label);
+        ImGui::Indent();
+        return true;
+    }
+
+    void EndGroup() override {
+        ImGui::Unindent();
+        ImGui::PopID();
+    }
+
+    void Help(std::string_view text) override {
+        if (!text.empty() && ImGui::IsItemHovered()) {
+            ImGui::SetTooltip("%.*s", static_cast<int>(text.size()), text.data());
+        }
+    }
+};
+
 // Runs a registry generator and logs how long it took, tagging the entry with
 // the generator's own name. This lives in the app instead of the generator
 // module so generators stay free of Vulkan/logging dependencies and remain
 // usable from the device-free tests.
 [[nodiscard]] std::optional<TiledMaze> GenerateMazeLogged(
-    const MazeGeneratorType& generator, const MazeGenSettings& settings,
+    const MazeGeneratorType& generator, const std::any& settings,
     const MazeSpec& spec) {
     VulkanShared::Timer timer(true);
     std::optional<TiledMaze> maze = generator.generate(spec, settings);
@@ -234,6 +336,12 @@ void ClampAxisCenter(float& center, float half_view, float extent) {
 
 MazeGeneratorApp::MazeGeneratorApp(const std::filesystem::path& executable_path)
     : exe_dir_(executable_path.parent_path()) {
+    // Start every generator with its own defaults; the registry manufactures
+    // the concrete settings type so the app only stores type-erased values.
+    for (std::size_t i = 0; i < std::size(kMazeGenerators); ++i) {
+        gen_settings_[i] = kMazeGenerators[i].make_defaults();
+    }
+
     // The ImGui overlay consumes mouse/keyboard events when it is hovered or
     // focused. Without this the maze also pans/zooms while the panel is used.
     hooks_.should_filter_mouse_input = []() -> bool {
@@ -627,17 +735,8 @@ void MazeGeneratorApp::DrawUi() {
     ImGui::PushID(ui_.generator_index);
     if (ImGui::CollapsingHeader(generator.name.data(),
                                 ImGuiTreeNodeFlags_DefaultOpen)) {
-        MazeGenSettings& settings = gen_settings_[ui_.generator_index];
-        for (const FloatParam& param : generator.floats) {
-            ImGui::SetNextItemWidth(240.0f);
-            ImGui::SliderFloat(param.label, &(settings.*param.value),
-                               param.min, param.max, param.format);
-        }
-        for (const IntParam& param : generator.ints) {
-            ImGui::SetNextItemWidth(240.0f);
-            ImGui::SliderInt(param.label, &(settings.*param.value),
-                             param.min, param.max);
-        }
+        ImGuiSettingsVisitor visitor;
+        generator.visit(gen_settings_[ui_.generator_index], visitor);
     }
     ImGui::PopID();
 

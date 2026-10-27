@@ -12,7 +12,17 @@ import MazeGenerator.TiledMaze;
 
 export namespace MazeGenerator {
 
-[[nodiscard]] inline std::optional<TiledMaze> GenerateRandomMaze(const MazeSpec& spec, const MazeGenSettings& settings) {
+struct RandomSettings {
+    float open_probability = 0.45f;
+};
+
+inline void VisitRandomSettings(RandomSettings& settings, SettingsVisitor& visitor) {
+    visitor.Float("Open probability", settings.open_probability, 0.0f, 1.0f);
+    visitor.Help("Chance that each interior wall is open.");
+}
+
+[[nodiscard]] inline std::optional<TiledMaze> GenerateRandomMaze(
+    const MazeSpec& spec, const RandomSettings& settings) {
     if (spec.width == 0 || spec.height == 0) {
         return std::nullopt;
     }

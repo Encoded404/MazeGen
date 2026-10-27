@@ -97,9 +97,10 @@ private:
     std::filesystem::path exe_dir_{};
     VulkanEngine::GameEngine engine_game_{};
 
-    // Maze + generation.
+    // Maze + generation. Each slot holds that generator's own settings type
+    // (created from the registry's make_defaults), not a shared struct.
     TiledMaze maze_{};
-    std::array<MazeGenSettings, std::size(kMazeGenerators)> gen_settings_{};
+    std::array<std::any, std::size(kMazeGenerators)> gen_settings_{};
     std::uint32_t density_mip_count_ = 0;
     // Largest side the selected device can bind for the debug cell buffer,
     // derived once at setup from its storage-range/allocation limits.
