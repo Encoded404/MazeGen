@@ -75,9 +75,10 @@ cmake --build --preset windows-release        # or windows-debug / windows-relwi
 ```
 
 Resulting executables land in `build-windows/bin/app/<Config>/` for the primary
-app and in `build-windows/bin/examples/<Config>/<name>/` for the examples, e.g.
-`build-windows/bin/app/Release/MazeGeneratorApp.exe`, together with the runtime
-DLLs that `add_app` copies next to them.
+app, e.g. `build-windows/bin/app/Release/MazeGeneratorApp.exe`, together with the
+runtime DLLs that `add_app` copies next to them. The examples are off by default;
+configure with `-DVKENGINE_BUILD_EXAMPLES=ON` to also build them into
+`build-windows/bin/examples/<Config>/<name>/`.
 
 ## 5. Run (optional, via wine)
 

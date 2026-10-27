@@ -42,6 +42,7 @@ cmake --preset default -S . -B build
 Useful options:
 
 - `-DBUILD_TESTING=OFF` to skip tests
+- `-DVKENGINE_BUILD_EXAMPLES=ON` to build the example applications (off by default)
 - `-DENABLE_LOGGING=OFF` to compile out logging macros
 - `-DCLANG_TIDY_ENABLED=OFF` to skip clang-tidy setup
 
@@ -62,8 +63,8 @@ cmake --build build --config Debug   # or Release/RelWithDebInfo
 The primary application is the `MazeGeneratorApp` target in `app/`, declared
 with the `add_app` helper. Its executable is written to
 `build/bin/app/<Config>/MazeGeneratorApp`, with the engine shaders and the
-app's own shaders deployed next to it. Examples are built to
-`build/bin/examples/<Config>/<name>/`.
+app's own shaders deployed next to it. With `-DVKENGINE_BUILD_EXAMPLES=ON`,
+examples are built to `build/bin/examples/<Config>/<name>/` as well.
 
 ## Tests
 
@@ -100,10 +101,10 @@ cmake --preset windows
 cmake --build --preset windows-release
 ```
 
-The app lands in `build-windows/bin/app/<Config>/MazeGeneratorApp.exe` and the
-examples in `build-windows/bin/examples/<Config>/<name>/`, with the required
-runtime DLLs copied next to them (run them with `wine` if you want to test on
-the host).
+The app lands in `build-windows/bin/app/<Config>/MazeGeneratorApp.exe`, with the
+required runtime DLLs copied next to it (run it with `wine` if you want to test
+on the host). Add `-DVKENGINE_BUILD_EXAMPLES=ON` to also build the examples into
+`build-windows/bin/examples/<Config>/<name>/`.
 
 Cross-compiling requires **CMake ≥ 4.2**. Shader hot reload
 (`-DVKENGINE_HOT_RELOAD`) is disabled for Windows targets, and on the native

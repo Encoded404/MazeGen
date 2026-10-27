@@ -934,10 +934,16 @@ endif()
 
 # Add subdirectories for the engine, the primary app, examples, the headless
 # maze benchmark and tests
+option(VKENGINE_BUILD_EXAMPLES "Build the example applications" OFF)
+
 include(AddApp)
 add_subdirectory(engine)
 add_subdirectory(app)
-add_subdirectory(examples)
+if(VKENGINE_BUILD_EXAMPLES)
+	add_subdirectory(examples)
+else()
+	message(STATUS "Examples are disabled (set VKENGINE_BUILD_EXAMPLES=ON to build them)")
+endif()
 add_subdirectory(bench)
 
 if(BUILD_TESTING)

@@ -86,5 +86,9 @@ add_subdirectory(physics)
 add_subdirectory(runtime)
 add_subdirectory(shared)
 add_subdirectory(security)
-add_subdirectory(examples)
+# The example tests link the example libraries, so they can only be built when
+# the examples themselves are enabled.
+if(VKENGINE_BUILD_EXAMPLES)
+	add_subdirectory(examples)
+endif()
 add_subdirectory(app)
