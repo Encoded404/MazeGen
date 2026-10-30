@@ -29,4 +29,10 @@ if(CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
     )
 endif()
 
+# The app modules compiled here are shared with MazeGeneratorApp, which links
+# logiface::logiface. Some of them (e.g. generators/CustomGeneratorV1.cppm) use
+# the logging interface, so the test target needs the same dependency to get the
+# logging include directory, LOGIFACE_PROJECT_ROOT, and the `logiface` module.
+target_link_libraries(app_tests PRIVATE logiface::logiface)
+
 setup_test_target(app_tests)

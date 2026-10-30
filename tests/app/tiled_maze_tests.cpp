@@ -96,4 +96,31 @@ TEST(TiledMazeTest, OpenThenCloseRestoresTheMazeAcrossTileBoundaries) {
     EXPECT_EQ(maze, fresh);
 }
 
+TEST(TiledMazeTest, EmptyMazeOpensInteriorAndKeepsBoundaryClosed) {
+    constexpr std::uint32_t kSize = 5;
+    const TiledMaze maze = TiledMaze::Create(kSize, kSize, false);
+
+    for (std::uint32_t y = 0; y < kSize; ++y) {
+        for (std::uint32_t x = 0; x < kSize; ++x) {
+            // The outer ring stays closed; every interior passage is open.
+            EXPECT_EQ(maze.North(x, y), y == 0) << x << "," << y;
+            EXPECT_EQ(maze.South(x, y), y == kSize - 1) << x << "," << y;
+            EXPECT_EQ(maze.West(x, y), x == 0) << x << "," << y;
+            EXPECT_EQ(maze.East(x, y), x == kSize - 1) << x << "," << y;
+        }
+    }
+}
+
+TEST(TiledMazeTest, FilledCreateMatchesTheDefault) {
+    EXPECT_EQ(TiledMaze::Create(5, 5, true), TiledMaze::Create(5, 5));
+}
+
+TEST(TiledMazeTest, EmptyMazeKeepsTheBoundaryClosedAtOneCell) {
+    const TiledMaze maze = TiledMaze::Create(1, 1, false);
+    EXPECT_TRUE(maze.North(0, 0));
+    EXPECT_TRUE(maze.West(0, 0));
+    EXPECT_TRUE(maze.South(0, 0));
+    EXPECT_TRUE(maze.East(0, 0));
+}
+
 } // namespace

@@ -37,7 +37,7 @@ namespace MazeGenerator::App {
 namespace {
 
 constexpr std::uint32_t kDefaultMazeSize = 4096;
-constexpr std::uint32_t kMinMazeSize = 64;
+constexpr std::uint32_t kMinMazeSize = 8;
 // Soft limit: dragging a size field stops here. Ctrl+Click (or double-click)
 // text entry can go past it, up to the device-derived hard cap.
 constexpr std::uint32_t kDragMaxMazeSize = 4096;
@@ -235,6 +235,13 @@ public:
             case FieldHint::Slider:
                 ImGui::SliderFloat(label, &value, min, max, format);
                 break;
+            case FieldHint::LogSlider:
+                // ImGui derives the track's zero-epsilon from the format's
+                // decimal count, so the caller's `min` and `format` decide the
+                // floor together; see FieldHint::LogSlider.
+                ImGui::SliderFloat(label, &value, min, max, format,
+                                   ImGuiSliderFlags_Logarithmic);
+                break;
             case FieldHint::Drag:
                 ImGui::DragFloat(label, &value, 0.01f, min, max, format);
                 break;
@@ -248,7 +255,10 @@ public:
              FieldHint hint) override {
         ImGui::SetNextItemWidth(240.0f);
         switch (hint) {
+            // ImGui has no logarithmic integer slider, so a log hint degrades
+            // to the linear one rather than dropping the field.
             case FieldHint::Slider:
+            case FieldHint::LogSlider:
                 ImGui::SliderInt(label, &value, min, max);
                 break;
             case FieldHint::Drag:
@@ -407,7 +417,7 @@ bool MazeGeneratorApp::OnSetup(VulkanEngine::Application::ApplicationContext& ct
     const MazeSpec spec{
         .width = kDefaultMazeSize,
         .height = kDefaultMazeSize,
-        .seed = static_cast<std::uint32_t>(ui_.seed),
+        .seed = ui_.seed,
     };
     std::optional<TiledMaze> generated =
         GenerateMazeLogged(generator, gen_settings_[ui_.generator_index], spec);
@@ -714,12 +724,14 @@ void MazeGeneratorApp::DrawUi() {
     DrawSizeField("Height", ui_.height);
 
     ImGui::SetNextItemWidth(150.0f);
-    ImGui::InputInt("Seed", &ui_.seed);
+    static constexpr std::uint32_t kSeedStep = 1;
+    static constexpr std::uint32_t kSeedStepFast = 100;
+    ImGui::InputScalar("Seed", ImGuiDataType_U32, &ui_.seed, &kSeedStep,
+                       &kSeedStepFast);
     ImGui::SameLine();
     if (ImGui::Button("Randomize")) {
-        ui_.seed = static_cast<int>(std::random_device{}());
+        ui_.seed = std::random_device{}();
     }
-    ui_.seed = std::max(ui_.seed, 0);
 
     std::array<const char*, std::size(kMazeGenerators)> generator_names{};
     for (std::size_t i = 0; i < generator_names.size(); ++i) {
@@ -858,7 +870,7 @@ void MazeGeneratorApp::RegenerateMaze(
     const MazeSpec spec{
         .width = width,
         .height = height,
-        .seed = static_cast<std::uint32_t>(std::max(ui_.seed, 0)),
+        .seed = ui_.seed,
     };
 
     std::optional<TiledMaze> generated =

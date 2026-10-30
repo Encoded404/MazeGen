@@ -50,7 +50,7 @@ private:
     struct UiState {
         int width = 4096;
         int height = 4096;
-        int seed = 1234;
+        std::uint32_t seed = 1234;
         int generator_index = 0;
         int solver_index = 0;
         int steps_per_frame = 500;

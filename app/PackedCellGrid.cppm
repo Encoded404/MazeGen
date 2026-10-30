@@ -23,10 +23,13 @@
 module;
 
 #include <cassert>
+#include <logging/logging_macros.hpp>
 
 export module MazeGenerator.PackedCellGrid;
 
 import std;
+
+import logiface;
 
 export namespace MazeGenerator {
 
@@ -67,6 +70,9 @@ public:
     [[nodiscard]] std::size_t CellCount() const noexcept {
         return static_cast<std::size_t>(width_) * height_;
     }
+    [[nodiscard]] std::size_t WordCount() const noexcept {
+        return words_.size();
+    }
 
     // Linear access, for solvers that already store a CellIndex.
     [[nodiscard]] std::uint32_t Get(std::size_t index) const noexcept {
@@ -88,6 +94,20 @@ public:
                        ((static_cast<std::uint64_t>(value) & kCellMask) << shift);
     }
 
+    // Raw view of one whole 64-bit word, exactly as stored, with no per-cell
+    // shift or mask. This is the fast path for "not visited" sweeps: on a
+    // 1-bit grid a zero word means all 64 of its cells are still unvisited, so
+    // a whole word can be rejected with a single comparison instead of 64
+    // Test() calls. On wider grids a zero word likewise means every cell in it
+    // is in the zero state. Cells past CellCount() in the last word are never
+    // written, so those padding bits stay zero and cannot make a fully
+    // unvisited word look visited. Iterate 0 .. WordCount() - 1; words are in
+    // the same row-major order as the cell indices.
+    [[nodiscard]] std::uint64_t Word(std::size_t word_index) const noexcept {
+        assert(word_index < words_.size());
+        return words_[word_index];
+    }
+
     // True when any bit of the cell is set. For a 1-bit grid this is the
     // visited test; for wider grids it means "not in the zero state".
     [[nodiscard]] bool Test(std::size_t index) const noexcept {
@@ -97,23 +117,40 @@ public:
     // 2-D access, for generators that walk in x/y.
     [[nodiscard]] std::uint32_t Get(std::uint32_t x,
                                     std::uint32_t y) const noexcept {
-        assert(x < width_ && y < height_);
+        assert((x < width_ && y < height_) ||
+               ReportOutOfBounds(x, y, width_, height_));
         return Get(static_cast<std::size_t>(y) * width_ + x);
     }
 
     void Set(std::uint32_t x, std::uint32_t y, std::uint32_t value) noexcept {
-        assert(x < width_ && y < height_);
+        assert((x < width_ && y < height_) ||
+               ReportOutOfBounds(x, y, width_, height_));
         Set(static_cast<std::size_t>(y) * width_ + x, value);
     }
 
     [[nodiscard]] bool Test(std::uint32_t x, std::uint32_t y) const noexcept {
-        assert(x < width_ && y < height_);
+        assert((x < width_ && y < height_) ||
+               ReportOutOfBounds(x, y, width_, height_));
         return Test(static_cast<std::size_t>(y) * width_ + x);
     }
 
     [[nodiscard]] bool operator==(const PackedCellGrid&) const = default;
 
 private:
+    // assert() only stringifies its expression, so it cannot show the runtime
+    // values. Log the offending coordinate and the grid extent first, then
+    // return false so assert still reports the usual file/line and aborts. The
+    // whole expression (including this call) compiles out under NDEBUG.
+    static bool ReportOutOfBounds(std::uint32_t x, std::uint32_t y,
+                                  std::uint32_t width,
+                                  std::uint32_t height) noexcept {
+        LOGIFACE_LOG(error,
+                     std::format("PackedCellGrid<{}>: cell (x={}, y={}) is "
+                                 "outside the {}x{} grid",
+                                 BitsPerCell, x, y, width, height));
+        return false;
+    }
+
     std::uint32_t width_ = 0;
     std::uint32_t height_ = 0;
     std::vector<std::uint64_t> words_{};

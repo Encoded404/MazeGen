@@ -36,9 +36,10 @@ public:
     static constexpr std::uint32_t kCellsPerTile = kTileSize * kTileSize;    // 256
     static constexpr std::uint32_t kWordsPerTile = kCellsPerTile * 2U / 64U; // 8
 
-    // Creates a width x height maze with every wall present. The extra
-    // boundary row/column is allocated internally.
-    [[nodiscard]] static TiledMaze Create(std::uint32_t width, std::uint32_t height);
+    // Creates a width x height maze with every wall present. With fill=false,
+    // every interior passage is open while the outer boundary stays closed.
+    // The extra boundary row/column is allocated internally.
+    [[nodiscard]] static TiledMaze Create(std::uint32_t width, std::uint32_t height, bool fill = true);
 
     // Creates a width x height maze with every border wall present except for
     // one opening in the top row and one mirrored opening in the bottom row.
@@ -123,7 +124,7 @@ private:
     std::vector<Tile> tiles_;
 };
 
-inline TiledMaze TiledMaze::Create(std::uint32_t width, std::uint32_t height) {
+inline TiledMaze TiledMaze::Create(std::uint32_t width, std::uint32_t height, bool fill) {
     assert(width > 0 && height > 0);
 
     TiledMaze maze;
@@ -138,7 +139,20 @@ inline TiledMaze TiledMaze::Create(std::uint32_t width, std::uint32_t height) {
 
     maze.tiles_.resize(maze.tiles_x_ * maze.tiles_y_);
     for (Tile& tile : maze.tiles_) {
-        tile.words.fill(~std::uint64_t{0});
+        tile.words.fill(fill ? ~std::uint64_t{0} : std::uint64_t{0});
+    }
+
+    if (!fill) {
+        // Clearing the words also clears the boundary row/column. Put the
+        // perimeter back so an empty maze is still closed to the outside.
+        for (std::uint32_t x = 0; x < width; ++x) {
+            maze.CloseNorth(x, 0);
+            maze.CloseSouth(x, height - 1);
+        }
+        for (std::uint32_t y = 0; y < height; ++y) {
+            maze.CloseWest(0, y);
+            maze.CloseEast(width - 1, y);
+        }
     }
     return maze;
 }
