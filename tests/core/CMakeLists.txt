@@ -52,6 +52,7 @@ add_executable(engine_tests
   font_watcher_tests.cpp
   text_system_tests.cpp
   frame_schedule_tests.cpp
+  thread_pool_teardown_tests.cpp
   ecs_profile_tests.cpp
   engine_modules_tests.cpp
   prefab_tests.cpp
