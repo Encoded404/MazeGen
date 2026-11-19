@@ -17,7 +17,8 @@ struct RandomSettings {
 };
 
 inline void VisitRandomSettings(RandomSettings& settings, SettingsVisitor& visitor) {
-    visitor.Float("Open probability", settings.open_probability, 0.0f, 1.0f);
+    visitor.Float({"open-probability", "Open probability"},
+                  settings.open_probability, 0.0f, 1.0f);
     visitor.Help("Chance that each interior wall is open.");
 }
 

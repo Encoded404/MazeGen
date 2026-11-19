@@ -66,6 +66,33 @@ with the `add_app` helper. Its executable is written to
 app's own shaders deployed next to it. With `-DVKENGINE_BUILD_EXAMPLES=ON`,
 examples are built to `build/bin/examples/<Config>/<name>/` as well.
 
+### Launch options
+
+`MazeGeneratorApp --help` lists the engine-wide flags and every app-specific
+one. The app-specific surface is:
+
+- `--width` / `--height` / `--seed` — size and seed of the first maze.
+- `--generator` / `--solver` — registry entries (`Random`, `CustomGeneratorV1`,
+  `A*`).
+- `--<generator>-<setting>` — every generation setting is a real option with
+  its range, default, and help text, for example
+  `--random-open-probability 0.6` or
+  `--custom-generator-v1-branch-chance 0.3`.
+- `--steps-per-frame` — solver expansions per frame (the maximum means
+  unlimited).
+- `--cycle` / `--cycle-dwell` — keep generating and solving: generate a maze,
+  solve it, hold the finished solve for `--cycle-dwell` seconds (default 1.5),
+  then generate the next maze with the next seed (base + completed cycles).
+  `--max-frames` still exits the loop cleanly for smoke runs.
+
+For example:
+
+```bash
+build/bin/app/Debug/MazeGeneratorApp --cycle --width 1024 --height 1024 \
+  --generator CustomGeneratorV1 \
+  --custom-generator-v1-branch-chance 0.3
+```
+
 ## Tests
 
 ```bash

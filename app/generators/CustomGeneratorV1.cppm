@@ -327,9 +327,11 @@ struct CustomGeneratorV1Settings {
 
 inline void VisitCustomGeneratorV1Settings(
     CustomGeneratorV1Settings& settings, SettingsVisitor& visitor) {
-    visitor.Float("Stop chance scaler", settings.stop_chance_scaler, 0.0f, 2.0f);
+    visitor.Float({"stop-chance-scaler", "Stop chance scaler"},
+                  settings.stop_chance_scaler, 0.0f, 2.0f);
     visitor.Help("Multiplier on the base chance of stopping at a cell.");
-    visitor.Float("Branch chance", settings.branch_chance, 0.0f, 1.0f);
+    visitor.Float({"branch-chance", "Branch chance"}, settings.branch_chance,
+                  0.0f, 1.0f);
     visitor.Help("Chance of branching instead of just turning.");
     // The useful band is a few thousandths to a few hundredths of the grid, so
     // the slider is logarithmic: a linear track would confine every value worth
@@ -337,11 +339,13 @@ inline void VisitCustomGeneratorV1Settings(
     // because "reopen every hole" is a meaningful setting; dragging all the way
     // left still lands on exactly 0.0, and the four-decimal format only floors
     // the non-zero positions (0.0001 and up). It and `min` move together.
-    visitor.Float("Hole Fill Threshold", settings.hole_fill_threshold, 0.0f,
-                  1.0f, "%.4f", FieldHint::LogSlider);
+    visitor.Float({"hole-fill-threshold", "Hole Fill Threshold"},
+                  settings.hole_fill_threshold, 0.0f, 1.0f, "%.4f",
+                  FieldHint::LogSlider);
     visitor.Help("Reopen holes holding more than this fraction of the grid; "
                  "smaller holes stay as rooms.");
-    visitor.Float("Hole Open Fraction", settings.hole_open_fraction, 0.0f, 1.0f);
+    visitor.Float({"hole-open-fraction", "Hole Open Fraction"},
+                  settings.hole_open_fraction, 0.0f, 1.0f);
     visitor.Help("Fraction of a reopened hole's walls to open as doors.");
 }
 

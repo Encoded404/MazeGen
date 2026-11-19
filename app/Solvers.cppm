@@ -31,4 +31,16 @@ inline constexpr SolverType kSolverTypes[] = {
     return kSolverTypes[index].create();
 }
 
+// Resolves a solver name for the CLI.
+// Exact matching, like FindGeneratorIndex.
+[[nodiscard]] inline std::optional<std::size_t> FindSolverIndex(
+    std::string_view name) noexcept {
+    for (std::size_t i = 0; i < std::size(kSolverTypes); ++i) {
+        if (kSolverTypes[i].name == name) {
+            return i;
+        }
+    }
+    return std::nullopt;
+}
+
 } // namespace MazeGenerator

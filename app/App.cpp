@@ -22,6 +22,7 @@ import Shaders.MazeGenerator.DebugOverlayFrag;
 import Shaders.MazeGenerator.MazeFrag;
 import Shaders.MazeGenerator.MazeFullscreenVert;
 
+import MazeGenerator.Cycle;
 import MazeGenerator.DebugGrid;
 import MazeGenerator.DebugOverlayPass;
 import MazeGenerator.Generation;
@@ -36,16 +37,10 @@ namespace MazeGenerator::App {
 
 namespace {
 
-constexpr std::uint32_t kDefaultMazeSize = 4096;
-constexpr std::uint32_t kMinMazeSize = 8;
-// Soft limit: dragging a size field stops here. Ctrl+Click (or double-click)
-// text entry can go past it, up to the device-derived hard cap.
+// Soft limit: dragging a size field stops here.
+// Ctrl+Click (or double-click) text entry can go past it, up to the device-derived hard cap.
 constexpr std::uint32_t kDragMaxMazeSize = 4096;
-// 65536^2 is exactly 4 GiB, one byte past the largest possible storage-buffer
-// binding range (uint32 max), so no side can exceed 65535.
-constexpr std::uint32_t kAbsoluteMaxMazeSize = 65535;
-// Above this the synchronous generator allocates several GiB and can take
-// minutes; the UI still allows it, but warns.
+// Above this the synchronous generator allocates several GiB and can take minutes; the UI still allows it, but warns.
 constexpr std::uint32_t kLargeMazeWarningSize = 16384;
 constexpr float kWallThicknessCells = 0.12f;
 constexpr float kInitialPixelsPerCell = 3.0f;
@@ -64,9 +59,6 @@ constexpr float kPanPixelsPerSecond = 700.0f;
 constexpr float kPanOverscrollFraction = 0.4f;
 constexpr float kZoomStep = 1.2f;
 constexpr float kMaxFrameDelta = 0.1f;
-// "Steps / frame" slider: the far-right position is a sentinel for an
-// unlimited expansion budget, so the largest finite value sits just below it.
-constexpr int kMaxStepsPerFrame = 500000;
 constexpr std::uint32_t kDebugCategoryOpen = 1u;
 constexpr std::uint32_t kDebugCategoryClosed = 2u;
 constexpr std::uint32_t kDebugCategoryPath = 4u;
@@ -138,10 +130,10 @@ void ClampAxisCenter(float& center, float half_view, float extent) {
     while (side > 0 && side * side > cell_bytes) {
         --side;
     }
-    side = std::min(side, static_cast<std::uint64_t>(kAbsoluteMaxMazeSize));
+    side = std::min(side, static_cast<std::uint64_t>(kMaxMazeSide));
     side -= side % 16;
     return static_cast<std::uint32_t>(
-        std::max(side, static_cast<std::uint64_t>(kMinMazeSize)));
+        std::max(side, static_cast<std::uint64_t>(kMinMazeSide)));
 }
 
 [[nodiscard]] std::unique_ptr<VulkanEngine::GpuResources::GpuBuffer> CreateUploadedBuffer(
@@ -228,30 +220,30 @@ void ClampAxisCenter(float& center, float half_view, float extent) {
 // settings remain plain structs.
 class ImGuiSettingsVisitor final : public SettingsVisitor {
 public:
-    void Float(const char* label, float& value, float min, float max,
+    void Float(const SettingsField& field, float& value, float min, float max,
                const char* format, FieldHint hint) override {
         ImGui::SetNextItemWidth(240.0f);
         switch (hint) {
             case FieldHint::Slider:
-                ImGui::SliderFloat(label, &value, min, max, format);
+                ImGui::SliderFloat(field.label, &value, min, max, format);
                 break;
             case FieldHint::LogSlider:
                 // ImGui derives the track's zero-epsilon from the format's
                 // decimal count, so the caller's `min` and `format` decide the
                 // floor together; see FieldHint::LogSlider.
-                ImGui::SliderFloat(label, &value, min, max, format,
+                ImGui::SliderFloat(field.label, &value, min, max, format,
                                    ImGuiSliderFlags_Logarithmic);
                 break;
             case FieldHint::Drag:
-                ImGui::DragFloat(label, &value, 0.01f, min, max, format);
+                ImGui::DragFloat(field.label, &value, 0.01f, min, max, format);
                 break;
             case FieldHint::Input:
-                ImGui::InputFloat(label, &value, 0.0f, 0.0f, format);
+                ImGui::InputFloat(field.label, &value, 0.0f, 0.0f, format);
                 break;
         }
     }
 
-    void Int(const char* label, int& value, int min, int max,
+    void Int(const SettingsField& field, int& value, int min, int max,
              FieldHint hint) override {
         ImGui::SetNextItemWidth(240.0f);
         switch (hint) {
@@ -259,22 +251,22 @@ public:
             // to the linear one rather than dropping the field.
             case FieldHint::Slider:
             case FieldHint::LogSlider:
-                ImGui::SliderInt(label, &value, min, max);
+                ImGui::SliderInt(field.label, &value, min, max);
                 break;
             case FieldHint::Drag:
-                ImGui::DragInt(label, &value, 1.0f, min, max);
+                ImGui::DragInt(field.label, &value, 1.0f, min, max);
                 break;
             case FieldHint::Input:
-                ImGui::InputInt(label, &value);
+                ImGui::InputInt(field.label, &value);
                 break;
         }
     }
 
-    void Bool(const char* label, bool& value) override {
-        ImGui::Checkbox(label, &value);
+    void Bool(const SettingsField& field, bool& value) override {
+        ImGui::Checkbox(field.label, &value);
     }
 
-    void Enum(const char* label, int& value,
+    void Enum(const SettingsField& field, int& value,
               std::span<const EnumOption> options) override {
         int index = 0;
         for (int i = 0; i < static_cast<int>(options.size()); ++i) {
@@ -284,30 +276,30 @@ public:
             }
         }
         ImGui::SetNextItemWidth(240.0f);
-        if (ImGui::Combo(label, &index, &EnumOptionsGetter, &options,
+        if (ImGui::Combo(field.label, &index, &EnumOptionsGetter, &options,
                          static_cast<int>(options.size())) &&
             index >= 0 && index < static_cast<int>(options.size())) {
             value = options[static_cast<std::size_t>(index)].value;
         }
     }
 
-    void Path(const char* label, std::string& value) override {
+    void Path(const SettingsField& field, std::string& value) override {
         std::array<char, 1024> buffer{};
         const std::size_t count = std::min(value.size(), buffer.size() - 1);
         std::memcpy(buffer.data(), value.data(), count);
         ImGui::SetNextItemWidth(240.0f);
-        if (ImGui::InputText(label, buffer.data(), buffer.size())) {
+        if (ImGui::InputText(field.label, buffer.data(), buffer.size())) {
             value = buffer.data();
         }
     }
 
-    bool BeginGroup(const char* label, bool default_open) override {
+    bool BeginGroup(const SettingsField& group, bool default_open) override {
         const ImGuiTreeNodeFlags flags =
             default_open ? ImGuiTreeNodeFlags_DefaultOpen : ImGuiTreeNodeFlags_None;
-        if (!ImGui::CollapsingHeader(label, flags)) {
+        if (!ImGui::CollapsingHeader(group.label, flags)) {
             return false;
         }
-        ImGui::PushID(label);
+        ImGui::PushID(group.label);
         ImGui::Indent();
         return true;
     }
@@ -344,12 +336,25 @@ public:
 
 } // namespace
 
-MazeGeneratorApp::MazeGeneratorApp(const std::filesystem::path& executable_path)
-    : exe_dir_(executable_path.parent_path()) {
-    // Start every generator with its own defaults; the registry manufactures
-    // the concrete settings type so the app only stores type-erased values.
+MazeGeneratorApp::MazeGeneratorApp(const std::filesystem::path& executable_path,
+                                   StartupOptions startup)
+    : exe_dir_(executable_path.parent_path())
+    , startup_(std::move(startup))
+    , cycle_(CycleConfig{
+          .enabled = startup_.cycle,
+          .base_seed = startup_.seed,
+          .dwell_seconds = startup_.cycle_dwell_seconds,
+      }) {
+    // Start every generator from its CLI-configured settings when one was supplied, else from its own defaults.
+    // The registry manufactures the concrete settings type, so the app only stores type-erased values; a mismatched type falls back to the default rather than making generate() throw later.
     for (std::size_t i = 0; i < std::size(kMazeGenerators); ++i) {
-        gen_settings_[i] = kMazeGenerators[i].make_defaults();
+        const std::any defaults = kMazeGenerators[i].make_defaults();
+        if (i < startup_.generator_settings.size() &&
+            startup_.generator_settings[i].type() == defaults.type()) {
+            gen_settings_[i] = startup_.generator_settings[i];
+        } else {
+            gen_settings_[i] = defaults;
+        }
     }
 
     // The ImGui overlay consumes mouse/keyboard events when it is hovered or
@@ -394,6 +399,12 @@ bool MazeGeneratorApp::OnSetup(VulkanEngine::Application::ApplicationContext& ct
         return false;
     }
 
+    // Resolve the device-side cell-buffer cap before choosing the initial size, so an oversized --width/--height starts at a supported size instead of failing while creating the debug buffers.
+    auto& backend = ctx.bootstrap->GetBackend();
+    max_maze_size_ = ComputeMaxMazeSize(backend);
+    std::cout << "MazeGenerator: max maze side " << max_maze_size_
+              << " (device storage-buffer limit)\n";
+
     auto& shader_mgr = engine_game_.GetContext().GetShaderManager();
     const auto fullscreen_vert =
         Shaders::MazeGenerator::MazeFullscreenVert::Register(shader_mgr, config.shader_data_dir);
@@ -410,13 +421,22 @@ bool MazeGeneratorApp::OnSetup(VulkanEngine::Application::ApplicationContext& ct
     (void)engine_game_.AddShaderDirectory(config.shader_data_dir);
 
     // ── Initial maze, through the generator registry ──
-    ui_.width = static_cast<int>(kDefaultMazeSize);
-    ui_.height = static_cast<int>(kDefaultMazeSize);
+    ui_.width = static_cast<int>(
+        std::clamp(startup_.width, kMinMazeSide, max_maze_size_));
+    ui_.height = static_cast<int>(
+        std::clamp(startup_.height, kMinMazeSide, max_maze_size_));
+    ui_.seed = startup_.seed;
+    ui_.steps_per_frame =
+        std::clamp(startup_.steps_per_frame, 1, kMaxStepsPerFrame);
+    ui_.generator_index = static_cast<int>(
+        std::min(startup_.generator_index, std::size(kMazeGenerators) - 1));
+    ui_.solver_index = static_cast<int>(
+        std::min(startup_.solver_index, std::size(kSolverTypes) - 1));
 
     const MazeGeneratorType& generator = kMazeGenerators[ui_.generator_index];
     const MazeSpec spec{
-        .width = kDefaultMazeSize,
-        .height = kDefaultMazeSize,
+        .width = static_cast<std::uint32_t>(ui_.width),
+        .height = static_cast<std::uint32_t>(ui_.height),
         .seed = ui_.seed,
     };
     std::optional<TiledMaze> generated =
@@ -440,11 +460,6 @@ bool MazeGeneratorApp::OnSetup(VulkanEngine::Application::ApplicationContext& ct
         std::cerr << "MazeGenerator: maze byte layout does not match the tile layout\n";
         return false;
     }
-
-    auto& backend = ctx.bootstrap->GetBackend();
-    max_maze_size_ = ComputeMaxMazeSize(backend);
-    std::cout << "MazeGenerator: max maze side " << max_maze_size_
-              << " (device storage-buffer limit)\n";
 
     auto maze_buffer = CreateUploadedBuffer(engine_game_, backend, raw.data(), raw.size());
     if (maze_buffer == nullptr) {
@@ -473,6 +488,10 @@ bool MazeGeneratorApp::OnSetup(VulkanEngine::Application::ApplicationContext& ct
     }
     FindOpenings();
     ResetSolver();
+    // In cycle mode the first maze starts solving immediately; every later cycle does the same after RegenerateMaze().
+    if (cycle_.Enabled()) {
+        StartSolver();
+    }
 
     auto& pipeline = engine_game_.GetRenderPipeline();
     pipeline.RegisterBufferResolver("maze-bits", [this](std::uint32_t) -> vk::Buffer {
@@ -672,6 +691,18 @@ void MazeGeneratorApp::OnFrameUpdate(
 
     AdvanceSolver();
 
+    // Auto-cycle: hold a finished solve on screen, then generate and solve the next maze.
+    // The timer uses the same clamped delta as the rest of the frame, so a long hitch cannot swallow the dwell in one step.
+    if (cycle_.Enabled()) {
+        // A live solver that is no longer running has either finished or been stopped; either way the cycle holds the result, then moves on.
+        if (!solver_running_ && solver_ != nullptr) {
+            cycle_.OnSolveFinished();
+        }
+        if (cycle_.Advance(dt, solver_running_)) {
+            StartNextCycle(ctx);
+        }
+    }
+
     FillConstants(width, height);
     SyncCamera(height);
     FlushDebugGrid();
@@ -700,12 +731,12 @@ void MazeGeneratorApp::DrawSizeField(const char* label, int& value) {
     // Dragging clamps to the soft range; Ctrl+Click (or double-click) manual
     // entry is not clamped by ImGui unless ImGuiSliderFlags_AlwaysClamp is
     // passed, which is exactly the soft-limit behavior we want.
-    ImGui::DragInt(label, &value, 16.0f, static_cast<int>(kMinMazeSize),
+    ImGui::DragInt(label, &value, 16.0f, static_cast<int>(kMinMazeSide),
                    static_cast<int>(kDragMaxMazeSize));
     // Apply the device hard cap only once the edit finishes, so typing "8192"
     // is not clamped at the intermediate "8".
     if (ImGui::IsItemDeactivatedAfterEdit()) {
-        value = std::clamp(value, static_cast<int>(kMinMazeSize),
+        value = std::clamp(value, static_cast<int>(kMinMazeSide),
                            static_cast<int>(max_maze_size_));
     }
 }
@@ -757,6 +788,10 @@ void MazeGeneratorApp::DrawUi() {
     }
     ImGui::TextDisabled("Current: %u x %u", maze_.Width(), maze_.Height());
     ImGui::TextDisabled("Max side: %u (device limit)", max_maze_size_);
+    if (cycle_.Enabled()) {
+        ImGui::TextDisabled("Auto-cycle: %u completed, seed %u",
+                            cycle_.CompletedCycles(), cycle_.Seed());
+    }
     if (ui_.width > static_cast<int>(kLargeMazeWarningSize) ||
         ui_.height > static_cast<int>(kLargeMazeWarningSize)) {
         ImGui::TextColored(ImVec4(1.0f, 0.75f, 0.25f, 1.0f),
@@ -826,11 +861,17 @@ void MazeGeneratorApp::ApplyUiRequests(
     const VulkanEngine::Application::ApplicationContext& ctx) {
     if (ui_.pending_generate) {
         ui_.pending_generate = false;
-        RegenerateMaze(ctx);
+        if (RegenerateMaze(ctx) && cycle_.Enabled()) {
+            StartSolver();
+        }
     }
     if (ui_.pending_reset) {
         ui_.pending_reset = false;
         ResetSolver();
+        // A reset clears the solver in cycle mode too; restart the same maze so the automatic loop does not stall on a cleared grid.
+        if (cycle_.Enabled()) {
+            StartSolver();
+        }
     }
     if (ui_.pending_stop) {
         ui_.pending_stop = false;
@@ -853,14 +894,14 @@ void MazeGeneratorApp::ApplyUiRequests(
     }
 }
 
-void MazeGeneratorApp::RegenerateMaze(
+bool MazeGeneratorApp::RegenerateMaze(
     const VulkanEngine::Application::ApplicationContext& ctx) {
     const std::uint32_t width = std::clamp(
         static_cast<std::uint32_t>(std::max(ui_.width, 0)),
-        kMinMazeSize, max_maze_size_);
+        kMinMazeSide, max_maze_size_);
     const std::uint32_t height = std::clamp(
         static_cast<std::uint32_t>(std::max(ui_.height, 0)),
-        kMinMazeSize, max_maze_size_);
+        kMinMazeSide, max_maze_size_);
     ui_.width = static_cast<int>(width);
     ui_.height = static_cast<int>(height);
     ui_.generator_index = std::clamp(
@@ -878,13 +919,13 @@ void MazeGeneratorApp::RegenerateMaze(
     if (!generated.has_value()) {
         std::cerr << "MazeGenerator: generator '" << generator.name
                   << "' rejected the current settings\n";
-        return;
+        return false;
     }
 
     MazeDensityData new_density = BuildMazeDensity(*generated);
     if (new_density.values.empty()) {
         std::cerr << "MazeGenerator: density pyramid is empty\n";
-        return;
+        return false;
     }
 
     auto& backend = ctx.bootstrap->GetBackend();
@@ -897,11 +938,11 @@ void MazeGeneratorApp::RegenerateMaze(
     if (new_maze_buffer == nullptr || new_density_buffer == nullptr) {
         // Flush any half-recorded immediate copies before returning.
         (void)engine_game_.GetStagingPool().FlushImmediate();
-        return;
+        return false;
     }
     if (!engine_game_.GetStagingPool().FlushImmediate()) {
         std::cerr << "MazeGenerator: maze upload failed\n";
-        return;
+        return false;
     }
 
     // The immediate flush submitted after all in-flight frames and waited, so
@@ -922,9 +963,11 @@ void MazeGeneratorApp::RegenerateMaze(
     FindOpenings();
     ResetViewForMaze();
     FillConstants(viewport_width_, viewport_height_);
+    return true;
 }
 
 void MazeGeneratorApp::ResetSolver() {
+    cycle_.OnSolveStarted();
     solver_.reset();
     solver_running_ = false;
     solver_status_ = SolverStatus::Running;
@@ -934,6 +977,7 @@ void MazeGeneratorApp::ResetSolver() {
 }
 
 void MazeGeneratorApp::StartSolver() {
+    cycle_.OnSolveStarted();
     solver_.reset();
     solver_ = CreateSolver(static_cast<std::size_t>(std::max(ui_.solver_index, 0)));
     if (solver_ == nullptr) {
@@ -952,6 +996,18 @@ void MazeGeneratorApp::StartSolver() {
     solver_running_ = true;
     solver_status_ = SolverStatus::Running;
     solver_stats_ = {};
+}
+
+void MazeGeneratorApp::StartNextCycle(
+    const VulkanEngine::Application::ApplicationContext& ctx) {
+    ui_.seed = cycle_.Seed();
+    if (!RegenerateMaze(ctx)) {
+        // The generator rejected the configuration; stop rather than retry the same failure every dwell period.
+        cycle_.Disable();
+        std::cerr << "MazeGenerator: auto-cycle stopped after a failed generation\n";
+        return;
+    }
+    StartSolver();
 }
 
 void MazeGeneratorApp::AdvanceSolver() {

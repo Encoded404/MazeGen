@@ -15,6 +15,8 @@ add_app(MazeGeneratorApp
         DebugOverlayPass.cpp
     MODULES
         App.cppm
+        Cycle.cppm
+        GeneratorCli.cppm
         TiledMaze.cppm
         PackedCellGrid.cppm
         MazeDensity.cppm

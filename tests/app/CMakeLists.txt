@@ -5,6 +5,8 @@ add_executable(app_tests
     generation_tests.cpp
     tiled_maze_tests.cpp
     packed_cell_grid_tests.cpp
+    cycle_tests.cpp
+    generator_cli_tests.cpp
 )
 
 # Compile the app's standalone modules into the test target so the density
@@ -26,6 +28,8 @@ if(CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
             ${CMAKE_SOURCE_DIR}/app/solvers/AStar.cppm
             ${CMAKE_SOURCE_DIR}/app/Solvers.cppm
             ${CMAKE_SOURCE_DIR}/app/DebugGrid.cppm
+            ${CMAKE_SOURCE_DIR}/app/Cycle.cppm
+            ${CMAKE_SOURCE_DIR}/app/GeneratorCli.cppm
     )
 endif()
 
@@ -34,5 +38,9 @@ endif()
 # the logging interface, so the test target needs the same dependency to get the
 # logging include directory, LOGIFACE_PROJECT_ROOT, and the `logiface` module.
 target_link_libraries(app_tests PRIVATE logiface::logiface)
+
+# GeneratorCli.cppm exposes the CLI settings visitor, so the tests link CLI11 just like the app executable does.
+find_package(CLI11 CONFIG REQUIRED)
+target_link_libraries(app_tests PRIVATE CLI11::CLI11)
 
 setup_test_target(app_tests)

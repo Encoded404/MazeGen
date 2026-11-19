@@ -2,6 +2,7 @@
 
 #include <any>
 #include <iterator>
+#include <set>
 #include <span>
 #include <string>
 #include <string_view>
@@ -25,6 +26,7 @@ using MazeGenerator::kMazeGenerators;
 using MazeGenerator::MazeGeneratorType;
 using MazeGenerator::MazeSpec;
 using MazeGenerator::RandomSettings;
+using MazeGenerator::SettingsField;
 using MazeGenerator::SettingsVisitor;
 using MazeGenerator::TiledMaze;
 using MazeGenerator::VisitCustomGeneratorV1Settings;
@@ -48,6 +50,7 @@ std::uint32_t BoundaryOpeningX(const TiledMaze& maze, bool top) {
 class RecordingVisitor final : public SettingsVisitor {
 public:
     struct Field {
+        std::string key;
         std::string label;
         std::string kind;
         FieldHint hint = FieldHint::Slider;
@@ -60,24 +63,26 @@ public:
     std::vector<std::string> groups;
     std::vector<std::string> helps;
 
-    void Float(const char* label, float&, float min, float max,
+    void Float(const SettingsField& field, float&, float min, float max,
                const char* format, FieldHint hint) override {
-        fields.push_back({label, "float", hint, min, max, format});
+        fields.push_back(
+            {field.key, field.label, "float", hint, min, max, format});
     }
-    void Int(const char* label, int&, int, int, FieldHint hint) override {
-        fields.push_back({label, "int", hint});
+    void Int(const SettingsField& field, int&, int, int, FieldHint hint) override {
+        fields.push_back({field.key, field.label, "int", hint});
     }
-    void Bool(const char* label, bool&) override {
-        fields.push_back({label, "bool"});
+    void Bool(const SettingsField& field, bool&) override {
+        fields.push_back({field.key, field.label, "bool"});
     }
-    void Enum(const char* label, int&, std::span<const EnumOption>) override {
-        fields.push_back({label, "enum"});
+    void Enum(const SettingsField& field, int&,
+              std::span<const EnumOption>) override {
+        fields.push_back({field.key, field.label, "enum"});
     }
-    void Path(const char* label, std::string&) override {
-        fields.push_back({label, "path"});
+    void Path(const SettingsField& field, std::string&) override {
+        fields.push_back({field.key, field.label, "path"});
     }
-    bool BeginGroup(const char* label, bool) override {
-        groups.push_back(label);
+    bool BeginGroup(const SettingsField& group, bool) override {
+        groups.push_back(group.label);
         return true;
     }
     void EndGroup() override {}
@@ -219,6 +224,7 @@ TEST(GeneratorRegistryTest, RandomDescribesItsOwnSettings) {
     VisitRandomSettings(settings, visitor);
 
     ASSERT_EQ(visitor.fields.size(), 1U);
+    EXPECT_EQ(visitor.fields[0].key, "open-probability");
     EXPECT_EQ(visitor.fields[0].label, "Open probability");
     EXPECT_EQ(visitor.fields[0].kind, "float");
     ASSERT_EQ(visitor.helps.size(), 1U);
@@ -230,12 +236,16 @@ TEST(GeneratorRegistryTest, CustomGeneratorDescribesItsOwnSettings) {
     VisitCustomGeneratorV1Settings(settings, visitor);
 
     ASSERT_EQ(visitor.fields.size(), 4U);
+    EXPECT_EQ(visitor.fields[0].key, "stop-chance-scaler");
     EXPECT_EQ(visitor.fields[0].label, "Stop chance scaler");
     EXPECT_EQ(visitor.fields[0].kind, "float");
+    EXPECT_EQ(visitor.fields[1].key, "branch-chance");
     EXPECT_EQ(visitor.fields[1].label, "Branch chance");
     EXPECT_EQ(visitor.fields[1].kind, "float");
+    EXPECT_EQ(visitor.fields[2].key, "hole-fill-threshold");
     EXPECT_EQ(visitor.fields[2].label, "Hole Fill Threshold");
     EXPECT_EQ(visitor.fields[2].kind, "float");
+    EXPECT_EQ(visitor.fields[3].key, "hole-open-fraction");
     EXPECT_EQ(visitor.fields[3].label, "Hole Open Fraction");
     EXPECT_EQ(visitor.fields[3].kind, "float");
     EXPECT_TRUE(visitor.groups.empty());
@@ -243,6 +253,23 @@ TEST(GeneratorRegistryTest, CustomGeneratorDescribesItsOwnSettings) {
     EXPECT_FLOAT_EQ(settings.branch_chance, 0.2f);
     EXPECT_FLOAT_EQ(settings.hole_fill_threshold, 0.2f);
     EXPECT_FLOAT_EQ(settings.hole_open_fraction, 0.075f);
+}
+
+TEST(GeneratorRegistryTest, EverySettingHasAStableUniqueKey) {
+    // Keys are the CLI/config surface; a duplicate or empty key would make one of the settings unreachable or ambiguous.
+    for (const MazeGeneratorType& generator : kMazeGenerators) {
+        std::any settings = generator.make_defaults();
+        RecordingVisitor visitor;
+        generator.visit(settings, visitor);
+
+        EXPECT_FALSE(visitor.fields.empty()) << generator.name;
+        std::set<std::string> keys;
+        for (const RecordingVisitor::Field& field : visitor.fields) {
+            EXPECT_FALSE(field.key.empty()) << generator.name;
+            EXPECT_TRUE(keys.insert(field.key).second)
+                << generator.name << " repeats key '" << field.key << "'";
+        }
+    }
 }
 
 TEST(GeneratorRegistryTest, HoleFillThresholdUsesALogarithmicSlider) {
@@ -279,6 +306,7 @@ TEST(GeneratorRegistryTest, TypeErasedEntryOwnsItsConcreteSettings) {
     RecordingVisitor visitor;
     random.visit(settings, visitor);
     ASSERT_EQ(visitor.fields.size(), 1U);
+    EXPECT_EQ(visitor.fields[0].key, "open-probability");
     EXPECT_EQ(visitor.fields[0].label, "Open probability");
 
     const auto maze = random.generate(

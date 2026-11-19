@@ -12,6 +12,7 @@ import VulkanEngine.GpuResources;
 import VulkanEngine.Input;
 import VulkanEngine.PipelinePass;
 
+import MazeGenerator.Cycle;
 import MazeGenerator.DebugGrid;
 import MazeGenerator.DebugOverlayPass;
 import MazeGenerator.Generation;
@@ -22,14 +23,42 @@ import MazeGenerator.TiledMaze;
 
 export namespace MazeGenerator::App {
 
+// Startup bounds shared by the CLI and OnSetup.
+// The device-derived side cap can be lower than kMaxMazeSide; OnSetup clamps to it before generating.
+inline constexpr std::uint32_t kDefaultMazeSide = 4096;
+inline constexpr std::uint32_t kMinMazeSide = 8;
+// 65536^2 is exactly 4 GiB, one byte past the largest possible storage-buffer binding range (uint32 max), so no side can exceed 65535.
+inline constexpr std::uint32_t kMaxMazeSide = 65535;
+inline constexpr int kDefaultStepsPerFrame = 500;
+// The far-right "Steps / frame" slider position is a sentinel for an unlimited expansion budget, so the largest finite value sits just below it.
+inline constexpr int kMaxStepsPerFrame = 500000;
+inline constexpr float kDefaultCycleDwellSeconds = 1.5f;
+
+// Launch-time choices.
+// The CLI fills these in; the defaults match the interactive UI, so a bare launch behaves exactly as before.
+struct StartupOptions {
+    std::uint32_t width = kDefaultMazeSide;
+    std::uint32_t height = kDefaultMazeSide;
+    std::uint32_t seed = 1234;
+    int steps_per_frame = kDefaultStepsPerFrame;
+    bool cycle = false;
+    float cycle_dwell_seconds = kDefaultCycleDwellSeconds;
+    std::size_t generator_index = 0;
+    std::size_t solver_index = 0;
+    // One configured settings value per kMazeGenerators entry, created by make_defaults() and then edited by the CLI.
+    // Empty (or a type mismatch) means the registry default for that entry.
+    std::vector<std::any> generator_settings{};
+};
+
 // Fullscreen maze viewer with a debug overlay and incremental solvers:
-//   * one TiledMaze, rendered from its packed wall bits at three LoD tiers;
-//   * one debug overlay pass reading the solver's per-cell state;
-//   * an ImGui panel that regenerates the maze, drives the solver, and toggles
-//     the debug layers.
+// one TiledMaze, rendered from its packed wall bits at three LoD tiers.
+// one debug overlay pass reading the solver's per-cell state.
+// an ImGui panel that regenerates the maze, drives the solver, and toggles the debug layers.
+// optional --cycle pacing that generates, solves, and repeats by itself.
 class MazeGeneratorApp {
 public:
-    explicit MazeGeneratorApp(const std::filesystem::path& executable_path);
+    explicit MazeGeneratorApp(const std::filesystem::path& executable_path,
+                              StartupOptions startup = {});
     ~MazeGeneratorApp();
 
     MazeGeneratorApp(const MazeGeneratorApp&) = delete;
@@ -48,12 +77,12 @@ private:
     // only writes these fields; ApplyUiRequests() consumes the pending flags at
     // the start of the next OnFrameUpdate.
     struct UiState {
-        int width = 4096;
-        int height = 4096;
+        int width = static_cast<int>(kDefaultMazeSide);
+        int height = static_cast<int>(kDefaultMazeSide);
         std::uint32_t seed = 1234;
         int generator_index = 0;
         int solver_index = 0;
-        int steps_per_frame = 500;
+        int steps_per_frame = kDefaultStepsPerFrame;
         bool debug_draw = true;
         unsigned debug_categories = 0x7u; // open | closed | path
         bool pending_generate = false;
@@ -71,7 +100,8 @@ private:
     void DrawUi();
     void DrawSizeField(const char* label, int& value);
     void ApplyUiRequests(const VulkanEngine::Application::ApplicationContext& ctx);
-    void RegenerateMaze(const VulkanEngine::Application::ApplicationContext& ctx);
+    bool RegenerateMaze(const VulkanEngine::Application::ApplicationContext& ctx);
+    void StartNextCycle(const VulkanEngine::Application::ApplicationContext& ctx);
     void ResetSolver();
     void StartSolver();
     void AdvanceSolver();
@@ -95,6 +125,8 @@ private:
     VulkanShared::ScopedHandle<void(VulkanEngine::Application::ApplicationContext&)> shutdown_token_{};
 
     std::filesystem::path exe_dir_{};
+    StartupOptions startup_{};
+    MazeCycle cycle_{};
     VulkanEngine::GameEngine engine_game_{};
 
     // Maze + generation. Each slot holds that generator's own settings type

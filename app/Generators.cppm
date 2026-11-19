@@ -67,4 +67,16 @@ inline constexpr MazeGeneratorType kMazeGenerators[] = {
     return kMazeGenerators;
 }
 
+// Resolves a registry name for the CLI.
+// Matching is exact so a typo fails loudly instead of silently picking a near-miss entry.
+[[nodiscard]] inline std::optional<std::size_t> FindGeneratorIndex(
+    std::string_view name) noexcept {
+    for (std::size_t i = 0; i < std::size(kMazeGenerators); ++i) {
+        if (kMazeGenerators[i].name == name) {
+            return i;
+        }
+    }
+    return std::nullopt;
+}
+
 } // namespace MazeGenerator
