@@ -961,7 +961,9 @@ bool MazeGeneratorApp::RegenerateMaze(
 
     ResetSolver();
     FindOpenings();
-    ResetViewForMaze();
+    if (startup_.reset_view_on_generate) {
+        ResetViewForMaze();
+    }
     FillConstants(viewport_width_, viewport_height_);
     return true;
 }

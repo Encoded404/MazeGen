@@ -93,13 +93,16 @@ TEST(GeneratorCliTest, EveryFieldKindParses) {
     EXPECT_EQ(settings.nested_count, 4);
 }
 
-TEST(GeneratorCliTest, RejectsOutOfRangeValues) {
+TEST(GeneratorCliTest, AcceptsValuesOutsideTheSuggestedRange) {
     SyntheticSettings settings{};
     CLI::App app{"test"};
     CliSettingsVisitor visitor(app, "test");
     VisitSynthetic(settings, visitor);
 
-    EXPECT_THROW(app.parse("--test-ratio 1.5"), CLI::ParseError);
+    app.parse("--test-ratio 1.5 --test-count 42");
+
+    EXPECT_FLOAT_EQ(settings.ratio, 1.5f);
+    EXPECT_EQ(settings.count, 42);
 }
 
 TEST(GeneratorCliTest, AttachesHelpTextToTheOption) {
@@ -111,6 +114,8 @@ TEST(GeneratorCliTest, AttachesHelpTextToTheOption) {
     CLI::Option* option = app.get_option("--test-ratio");
     ASSERT_NE(option, nullptr);
     EXPECT_NE(option->get_description().find("How much ratio."),
+              std::string::npos);
+    EXPECT_NE(option->get_description().find("Suggested range: 0 to 1."),
               std::string::npos);
 }
 

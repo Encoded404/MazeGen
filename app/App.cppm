@@ -41,6 +41,8 @@ struct StartupOptions {
     std::uint32_t height = kDefaultMazeSide;
     std::uint32_t seed = 1234;
     int steps_per_frame = kDefaultStepsPerFrame;
+    // Recenter and re-fit the view after each generation; off by default so a regenerated maze stays where the user was looking.
+    bool reset_view_on_generate = false;
     bool cycle = false;
     float cycle_dwell_seconds = kDefaultCycleDwellSeconds;
     std::size_t generator_index = 0;

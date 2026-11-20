@@ -24,17 +24,14 @@ struct MazeSpec {
     std::uint32_t seed = 0;
 };
 
-// How a numeric field should be presented. Input accepts free-form entry, Drag
-// is a scrubbable field, and Slider is bounded by the declared range. LogSlider
-// is a Slider whose track is logarithmic: use it for settings that live in a
-// small band near one end of their range, where a linear track would spend the
-// whole width on values nobody picks. Two caveats come with it, both from the
-// underlying widget. First, the format's decimal count sets the smallest
-// non-zero value the track can reach (`"%.4f"` bottoms out at 0.0001), so choose
-// `min` and `format` together rather than relying on the range alone. Second, a
-// `min` of zero stays reachable: the far-left end of the track yields exactly
-// zero, and only the positions above it are log-spaced from that 10^-digits
-// floor upward.
+// How a numeric field should be presented.
+// Input accepts free-form entry.
+// Drag is a scrubbable field.
+// Slider presents a track over the declared range, which both ImGui and the CLI treat as soft limits.
+// LogSlider is a Slider whose track is logarithmic: use it for settings that live in a small band near one end of their range, where a linear track would spend the whole width on values nobody picks.
+// Two caveats come with it, both from the underlying widget.
+// First, the format's decimal count sets the smallest non-zero value the track can reach (`"%.4f"` bottoms out at 0.0001), so choose `min` and `format` together rather than relying on the range alone.
+// Second, a `min` of zero stays reachable: the far-left end of the track yields exactly zero, and only the positions above it are log-spaced from that 10^-digits floor upward.
 enum class FieldHint : std::uint8_t {
     Slider,
     Drag,

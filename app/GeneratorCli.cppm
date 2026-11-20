@@ -60,6 +60,7 @@ export namespace MazeGenerator {
 // `app` is usually a per-generator option group.
 // Option names are `--<prefix>-<group path>-<key>`, so the same key can exist in different generators.
 // Hyphens rather than dots are deliberate: CLI11 treats dots in a command-line token as subcommand dot-notation, so `--random.open-probability` would not parse as a plain option.
+// Numeric ranges are soft: they appear in help but do not reject values, matching the ImGui controls.
 class CliSettingsVisitor final : public SettingsVisitor {
 public:
     CliSettingsVisitor(CLI::App& app, std::string prefix)
@@ -67,9 +68,9 @@ public:
 
     void Float(const SettingsField& field, float& value, float min, float max,
                const char* /*format*/, FieldHint /*hint*/) override {
-        last_ = current_->add_option(OptionName(field.key), value, field.label)
-                    ->check(CLI::Range(static_cast<double>(min),
-                                       static_cast<double>(max)))
+        last_range_ = RangeHint(min, max);
+        last_ = current_->add_option(OptionName(field.key), value,
+                                     Describe(field.label, last_range_))
                     ->type_name("F")
                     ->capture_default_str();
         last_label_ = field.label;
@@ -77,8 +78,9 @@ public:
 
     void Int(const SettingsField& field, int& value, int min, int max,
              FieldHint /*hint*/) override {
-        last_ = current_->add_option(OptionName(field.key), value, field.label)
-                    ->check(CLI::Range(min, max))
+        last_range_ = RangeHint(min, max);
+        last_ = current_->add_option(OptionName(field.key), value,
+                                     Describe(field.label, last_range_))
                     ->type_name("N")
                     ->capture_default_str();
         last_label_ = field.label;
@@ -87,6 +89,7 @@ public:
     void Bool(const SettingsField& field, bool& value) override {
         last_ = current_->add_flag(OptionName(field.key), value, field.label);
         last_label_ = field.label;
+        last_range_.clear();
     }
 
     void Enum(const SettingsField& field, int& value,
@@ -101,6 +104,7 @@ public:
                     ->type_name("NAME")
                     ->capture_default_str();
         last_label_ = field.label;
+        last_range_.clear();
     }
 
     void Path(const SettingsField& field, std::string& value) override {
@@ -108,6 +112,7 @@ public:
                     ->type_name("PATH")
                     ->capture_default_str();
         last_label_ = field.label;
+        last_range_.clear();
     }
 
     bool BeginGroup(const SettingsField& group, bool /*default_open*/) override {
@@ -118,6 +123,7 @@ public:
         }
         group_path_ += group.key;
         last_ = nullptr;
+        last_range_.clear();
         return true;
     }
 
@@ -129,6 +135,7 @@ public:
         group_path_.resize(groups_.back().path_size);
         groups_.pop_back();
         last_ = nullptr;
+        last_range_.clear();
     }
 
     void Help(std::string_view text) override {
@@ -140,6 +147,10 @@ public:
             description += ". ";
         }
         description += text;
+        if (!last_range_.empty()) {
+            description += " ";
+            description += last_range_;
+        }
         last_->description(description);
     }
 
@@ -148,6 +159,21 @@ private:
         CLI::App* parent = nullptr;
         std::size_t path_size = 0;
     };
+
+    template <class T>
+    [[nodiscard]] static std::string RangeHint(T min, T max) {
+        return std::format("Suggested range: {} to {}.", min, max);
+    }
+
+    [[nodiscard]] static std::string Describe(const char* label,
+                                              std::string_view range) {
+        std::string description = label;
+        if (!description.empty()) {
+            description += ". ";
+        }
+        description += range;
+        return description;
+    }
 
     [[nodiscard]] std::string OptionName(std::string_view key) const {
         std::string name = "--";
@@ -167,6 +193,7 @@ private:
     std::vector<GroupFrame> groups_;
     CLI::Option* last_ = nullptr;
     std::string last_label_;
+    std::string last_range_;
 };
 
 // Registers the settings of every generator in `generators`.

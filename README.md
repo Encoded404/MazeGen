@@ -75,11 +75,13 @@ one. The app-specific surface is:
 - `--generator` / `--solver` — registry entries (`Random`, `CustomGeneratorV1`,
   `A*`).
 - `--<generator>-<setting>` — every generation setting is a real option with
-  its range, default, and help text, for example
+  its suggested range, default, and help text, for example
   `--random-open-probability 0.6` or
   `--custom-generator-v1-branch-chance 0.3`.
 - `--steps-per-frame` — solver expansions per frame (the maximum means
   unlimited).
+- `--reset-view-on-generate` — recenter and re-fit the view after each
+  generation; off by default so the current view is kept.
 - `--cycle` / `--cycle-dwell` — keep generating and solving: generate a maze,
   solve it, hold the finished solve for `--cycle-dwell` seconds (default 1.5),
   then generate the next maze with the next seed (base + completed cycles).

@@ -76,6 +76,9 @@ int VulkanEngine::AppMain(int argc, char* const argv[]) {
         ->capture_default_str();
 
     cli.App()
+        .add_flag("--reset-view-on-generate", options.reset_view_on_generate,
+                  "Recenter and re-fit the view after each maze generation");
+    cli.App()
         .add_flag("--cycle", options.cycle,
                   "Keep cycling: generate a maze, solve it, hold the result, then repeat");
     cli.App()
